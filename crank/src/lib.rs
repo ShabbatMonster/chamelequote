@@ -331,8 +331,12 @@ impl<'a, L: Ledger> Crank<'a, L> {
     /// The three tick arrays a swap starting at the current price walks through.
     pub fn swap_arrays(&self, pool: &Pubkey, a_to_b: bool) -> [Pubkey; 3] {
         let p = self.pool(pool).expect("pool missing");
-        let span = p.tick_spacing as i32 * math::TICK_ARRAY_SIZE;
-        let start = math::tick_array_start(p.tick_current, p.tick_spacing as i32);
+        let ts = p.tick_spacing as i32;
+        let span = ts * math::TICK_ARRAY_SIZE;
+        // Orca starts a price-up (b to a) swap from the array holding the tick one spacing above
+        // the current one; from the current tick's array that fails whenever the price sits in
+        // the last spacing of its array.
+        let start = math::tick_array_start(p.tick_current + if a_to_b { 0 } else { ts }, ts);
         let step = if a_to_b { -span } else { span };
         [0, 1, 2].map(|k| wp::tick_array_address(pool, start + k * step))
     }
