@@ -1,8 +1,8 @@
 //! chamelequote keeper.
 //!
-//! Switches take the fast path (see fast.rs): every step packed into as few transactions as fit
-//! (usually one, so the switch is atomic). If that fails the keeper falls back to sending the
-//! steps one by one.
+//! A switch goes through as ONE transaction (see fast.rs): the program only lets the liquidity
+//! out of the pool in a transaction that also puts it back, so the coin never stops trading. A
+//! switch that can't land is retried until its deadline, then cancelled (burn refunded).
 //!
 //! Every ~50 s it pokes the price averages of every listed quote and of the coin's own pool (a
 //! switch refuses to trade on an average older than two minutes). Every few seconds it checks
@@ -11,7 +11,6 @@
 //! tests drive.
 //!
 //!   keeper run    --rpc <url> --keypair <path> [--priority-fee <micro-lamports per CU>]
-//!                 [--fast 0 to always send switch steps one by one]
 //!   keeper once   ...          one poke round + crank until idle, then exit
 //!   keeper status --rpc <url>  print the switch state and how fresh the averages are
 //!
@@ -28,7 +27,6 @@
 mod fast;
 
 use std::{
-    collections::HashMap,
     thread::sleep,
     time::{Duration, Instant},
 };
@@ -60,8 +58,8 @@ const CLOCK_SYSVAR: Pubkey = anchor_lang::prelude::pubkey!("SysvarC1ock111111111
 const POKE_EVERY: Duration = Duration::from_secs(40);
 const RELIST_EVERY: Duration = Duration::from_secs(600);
 const TICK: Duration = Duration::from_secs(1);
-// One fast attempt per request, then step by step (the deadline is 10 minutes).
-const FAST_ATTEMPTS: u32 = 1;
+// How often a requested switch is retried until it lands (the deadline is 10 minutes).
+const RETRY_EVERY: Duration = Duration::from_secs(3);
 const CLAIM_EVERY: Duration = Duration::from_secs(900);
 
 // Mainnet defaults for `init`. (The pool config fields are unused since the move to DAMM v2.)
@@ -114,8 +112,6 @@ struct Opts {
     rpc: String,
     keypair: Option<String>,
     priority_fee: u64,
-    /// Fast switches (one or two transactions); off sends every step separately.
-    fast: bool,
     /// Everything else, by flag name (for the admin commands).
     extra: std::collections::HashMap<String, String>,
 }
@@ -296,30 +292,31 @@ fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
 /// Pushes an in-flight switch forward until idle or a step fails. Returns steps sent.
 /// A fresh request takes the fast path once; anything else, or a request whose fast attempt
 /// failed, goes step by step.
-fn crank_round(rpc: &Rpc, payer: &Keypair, fee: u64, fast: bool, attempts: &mut HashMap<i64, u32>) -> usize {
-    if fast {
-        let state = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Crank::new(rpc, payer.pubkey()).config()));
-        if let Ok(c) = state {
-            let fresh = c.switch.phase == chamelequote::state::Phase::Requested && rpc.now() <= c.switch.deadline;
-            let tries = attempts.entry(c.switch.deadline).or_insert(0);
-            if fresh && *tries < FAST_ATTEMPTS {
-                *tries += 1;
-                match fast::try_fast(rpc, payer, fee) {
-                    Ok(true) => {
-                        log("switch done on the fast path");
-                        return 1;
-                    }
-                    // Nothing to do yet (the RPC node we asked may not have seen the request
-                    // yet): that doesn't count as an attempt; look again next tick.
-                    Ok(false) => {
-                        *tries -= 1;
-                        return 0;
-                    }
-                    Err(e) => log(&format!("fast path failed, going step by step: {}", first_line(&e))),
-                }
+fn crank_round(rpc: &Rpc, payer: &Keypair, fee: u64, last_try: &mut Option<Instant>) -> usize {
+    // A request goes through as ONE transaction (the program won't let the liquidity out
+    // otherwise), retried every few seconds until it lands or its deadline passes; it is never
+    // sent step by step.
+    let state = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Crank::new(rpc, payer.pubkey()).config()));
+    if let Ok(c) = state {
+        if c.switch.phase == chamelequote::state::Phase::Requested && rpc.now() <= c.switch.deadline {
+            if last_try.is_some_and(|t| t.elapsed() < RETRY_EVERY) {
+                return 0;
             }
+            *last_try = Some(Instant::now());
+            return match fast::try_fast(rpc, payer, fee) {
+                Ok(true) => {
+                    log("switch done in one transaction");
+                    1
+                }
+                Ok(false) => 0,
+                Err(e) => {
+                    log(&format!("switch didn't land, will retry: {}", first_line(&e)));
+                    0
+                }
+            };
         }
     }
+    // Everything else: seeding a new pool's sentinel, a launch, cancelling an expired request.
     let mut sent = 0;
     for _ in 0..24 {
         let next = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Crank::new(rpc, payer.pubkey()).next()));
@@ -372,8 +369,7 @@ fn status(rpc: &Rpc) {
     let now = rpc.now();
     println!("mint          {}", c.mint);
     println!("active quote  {}", c.active_quote);
-    let venue = if crank.is_legacy(&c.active_pool) { "Raydium (moves to Meteora at the next switch)" } else { "Meteora DAMM v2" };
-    println!("active pool   {} ({venue})", c.active_pool);
+    println!("active pool   {} (Meteora DAMM v2)", c.active_pool);
     println!("switch phase  {:?} (target {}, holding {}, deadline in {}s)", c.switch.phase, c.switch.target, c.switch.holding, c.switch.deadline - now);
     println!("pool average  last poke {}s ago, warm: {}", now - c.pool_ema.last_ts, c.pool_ema.is_valid(now));
     for q in rpc.quote_entries() {
@@ -389,7 +385,6 @@ fn parse() -> (String, Opts) {
         rpc: std::env::var("RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".into()),
         keypair: std::env::var("KEEPER_KEYPAIR").ok(),
         priority_fee: 0,
-        fast: true,
         extra: Default::default(),
     };
     while let Some(a) = args.next() {
@@ -398,7 +393,6 @@ fn parse() -> (String, Opts) {
             "--rpc" => o.rpc = val(),
             "--keypair" => o.keypair = Some(val()),
             "--priority-fee" => o.priority_fee = val().parse().expect("--priority-fee takes a number"),
-            "--fast" => o.fast = val() != "0",
             other if other.starts_with("--") => {
                 let v = val();
                 o.extra.insert(other[2..].to_string(), v);
@@ -448,7 +442,7 @@ fn main() {
     }
 
     let mut last_claim = None::<Instant>;
-    let mut attempts: HashMap<i64, u32> = HashMap::new();
+    let mut last_try = None::<Instant>;
     let mut quotes = rpc.quote_entries();
     let (mut last_poke, mut last_list) = (None::<Instant>, Instant::now());
     loop {
@@ -460,7 +454,7 @@ fn main() {
             poke_round(&rpc, &payer, &quotes, o.priority_fee);
             last_poke = Some(Instant::now());
         }
-        crank_round(&rpc, &payer, o.priority_fee, o.fast, &mut attempts);
+        crank_round(&rpc, &payer, o.priority_fee, &mut last_try);
         if last_claim.is_none_or(|t| t.elapsed() >= CLAIM_EVERY) {
             if let Some(a) = Crank::new(&rpc, payer.pubkey()).claim_fees() {
                 match send(&rpc, &payer, &a, o.priority_fee) {

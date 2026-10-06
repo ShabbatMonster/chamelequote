@@ -26,8 +26,9 @@ Status: tested locally with LiteSVM against the real Meteora DAMM v2, Orca, Rayd
    - `hop`: swaps the backing one Orca route pool at a time, via USDC or SOL, checked against on-chain price averages.
    - `reprice`: if the coin has used the target pool before, swaps it to the translated price through its sentinel.
    - `seed`: gives an old pool that has none a sentinel first.
-   - `add`: lays the liquidity back as one position over the pool's range: unsold tokens from the price up, backing from the floor up to the price. A new pool is created here at the translated price, with the floor as its lower bound, and gets its sentinel: a small position (0.1% of the backing) left in every pool for good, since a pool with no liquidity can't be moved to a new price. The escrowed burn is burned here.
-3. If a switch is not done within 10 minutes, `abort` refunds the burn and lays the backing into whatever token it is held in.
+   - `add`: lays the liquidity back as one position over the pool's range: unsold tokens from the price up, backing from the floor up to the price. A new pool is created here at the translated price, with the floor as its lower bound; its sentinel (a small position, 0.1% of the backing, left in every pool for good, since a pool with no liquidity can't be moved to a new price) is opened by `seed` right after. The escrowed burn is burned here.
+   All of it happens in ONE transaction: `pull` refuses to run unless an `add` follows in the same transaction, so a switch lands whole or not at all and the coin never stops trading. The longest route (three hops into a new pool) fits the 64-account and 64-entry trace limits. The new pool's sentinel is seeded right after, outside that transaction.
+3. If a switch can't land within 10 minutes, `abort` refunds the burn; nothing was pulled.
 
 The price averages refuse trades during sharp moves: after a 2x pump, switching waits roughly 25 minutes.
 
@@ -61,5 +62,5 @@ It needs a funded wallet. Each poke round costs a few transactions a minute, and
 - Tokenized stocks (xStocks) are issued by a company that can freeze or move them, including the coin's backing while it sits in one.
 - The admin key can list quotes (it can't touch funds or metadata). Renounce it with `set_admin(default)` once the list is final.
 - A DAMM v2 pool's range is fixed when it is created, and there is one pool per quote. When the coin comes back to a quote, part of the backing or of the unsold coins may not fit the old range and waits outside the pool until the next switch; a request that would land below the old floor is refused before anything burns. A pool for a quote created by someone else is refused too.
-- That refusal happens at request time for the target only. A switch aborted after its deadline lands in whichever hub (USDC or SOL) the backing is in; if someone had created that hub's pool for this coin first, the landing would stall. Running a switch through each hub early, so the program owns those pools, closes this.
+- A switch to a pool that has no sentinel (only the launch pool, if nothing was bought before leaving it) needs a `seed` inside the switch transaction; on a three-hop route that doesn't fit, and the request is refunded at its deadline.
 - A switch into a pool that doesn't exist yet costs the requester 0.03 SOL (to the fee recipient, who funds the keeper): the rent of the pool and its sentinel.

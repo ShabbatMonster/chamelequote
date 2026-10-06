@@ -847,16 +847,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
- "uint",
-]
-
-[[package]]
-name = "chamelequote"
-version = "0.1.0"
-source = "git+file:///C:/Users/Evan/Desktop/chamelequote?rev=9bfee32#9bfee322123d78eb07d1d8d5b2dfa96cade75f13"
-dependencies = [
- "anchor-lang",
- "anchor-spl",
+ "solana-instructions-sysvar 3.0.1",
  "uint",
 ]
 
@@ -865,18 +856,7 @@ name = "chamelequote-crank"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
- "chamelequote 0.1.0",
- "solana-keypair",
- "solana-signer",
-]
-
-[[package]]
-name = "chamelequote-crank"
-version = "0.1.0"
-source = "git+file:///C:/Users/Evan/Desktop/chamelequote?rev=9bfee32#9bfee322123d78eb07d1d8d5b2dfa96cade75f13"
-dependencies = [
- "anchor-lang",
- "chamelequote 0.1.0 (git+file:///C:/Users/Evan/Desktop/chamelequote?rev=9bfee32)",
+ "chamelequote",
  "solana-keypair",
  "solana-signer",
 ]
@@ -888,9 +868,8 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "base64 0.22.1",
- "chamelequote 0.1.0",
- "chamelequote-crank 0.1.0",
- "chamelequote-crank 0.1.0 (git+file:///C:/Users/Evan/Desktop/chamelequote?rev=9bfee32)",
+ "chamelequote",
+ "chamelequote-crank",
  "litesvm",
  "serde_json",
  "solana-account",

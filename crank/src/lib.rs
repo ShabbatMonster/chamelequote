@@ -17,9 +17,8 @@ use chamelequote::{
     accounts, damm, instruction,
     instructions::{clamp_to_range, expected_pool, liquidity_for, position_mint_address, InitializeParams},
     math, metaplex,
-    raydium as ray,
     state::{
-        sentinel_share, within_bps, Config, Phase, QuoteEntry, AUTHORITY_SEED, CONFIG_SEED, ESCROW_SEED, MAIN_SLOT,
+        sentinel_share, within_bps, SENTINEL_DIVISOR, Config, Phase, QuoteEntry, AUTHORITY_SEED, CONFIG_SEED, ESCROW_SEED, MAIN_SLOT,
         PRICE_TOLERANCE_BPS, QUOTE_SEED, SENTINEL_SLOT,
     },
     whirlpool::{self as wp, PoolState, Sides},
@@ -28,6 +27,7 @@ use chamelequote::{
 use solana_keypair::Keypair;
 
 pub const TOKEN_PROGRAM: Pubkey = anchor_lang::prelude::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+pub const INSTRUCTIONS_SYSVAR: Pubkey = anchor_lang::prelude::pubkey!("Sysvar1nstructions1111111111111111111111111");
 
 /// Where accounts come from: an RPC node, or LiteSVM in tests.
 pub trait Ledger {
@@ -178,20 +178,9 @@ impl<'a, L: Ledger> Crank<'a, L> {
         self.ledger.account(key).filter(|(o, _)| *o == damm::DAMM_ID).and_then(|(_, d)| damm::parse_pool(&d))
     }
 
-    /// Whether `pool` is the Raydium pool the liquidity lived in before the move to DAMM v2.
-    pub fn is_legacy(&self, pool: &Pubkey) -> bool {
-        self.ledger.account(pool).is_some_and(|(o, _)| o == ray::CLMM_ID)
-    }
-
-    /// sqrt(quote per index) on one of our pools, on either venue.
+    /// sqrt(quote per index) on our pool.
     pub fn our_sqrt(&self, pool: &Pubkey) -> Option<u128> {
-        if self.is_legacy(pool) {
-            let c = self.config();
-            let p = self.ledger.account(pool).and_then(|(_, d)| ray::parse_pool(&d))?;
-            Some(math::flip(p.sqrt_price, !c.index_is_a(&c.active_quote)))
-        } else {
-            self.our_pool(pool).map(|p| p.sqrt_price)
-        }
+        self.our_pool(pool).map(|p| p.sqrt_price)
     }
 
     fn our_pool_accounts(&self, c: &Config, quote: &Pubkey) -> accounts::OurPool {
@@ -246,9 +235,6 @@ impl<'a, L: Ledger> Crank<'a, L> {
 
     pub fn pull_ix(&self) -> Instruction {
         let c = self.config();
-        if self.is_legacy(&c.active_pool) {
-            return self.pull_legacy_ix(&c);
-        }
         let fee = c.fee_recipient;
         Instruction {
             program_id: PROGRAM_ID,
@@ -260,64 +246,11 @@ impl<'a, L: Ledger> Crank<'a, L> {
                 position: Self::slot(&c.active_pool, MAIN_SLOT),
                 fee_index: wp::ata(&fee, &c.mint, &TOKEN_PROGRAM),
                 fee_quote: wp::ata(&fee, &c.active_quote, &self.token_program(&c.active_quote)),
+                instructions: INSTRUCTIONS_SYSVAR,
                 programs: Self::programs(),
             }
             .to_account_metas(None),
             data: instruction::Pull {}.data(),
-        }
-    }
-
-    fn pull_legacy_ix(&self, c: &Config) -> Instruction {
-        let pool = c.active_pool;
-        let p = self.ledger.account(&pool).and_then(|(_, d)| ray::parse_pool(&d)).expect("legacy pool missing");
-        let ts = p.tick_spacing as i32;
-        let slot = |i: u8| {
-            let nft_mint = position_mint_address(&pool, i).0;
-            let personal = ray::personal_position_address(&nft_mint);
-            let (lo, hi) = self
-                .ledger
-                .account(&personal)
-                .and_then(|(_, d)| ray::parse_position(&d))
-                .map(|p| (p.tick_lower, p.tick_upper))
-                .unwrap_or((0, 0));
-            accounts::RaySlot {
-                nft_mint,
-                nft_account: wp::ata(&authority(), &nft_mint, &wp::TOKEN_2022_ID),
-                personal,
-                lower: ray::tick_array_address(&pool, ray::tick_array_start(lo, ts)),
-                upper: ray::tick_array_address(&pool, ray::tick_array_start(hi, ts)),
-            }
-        };
-        let fee = c.fee_recipient;
-        let (m0, m1) = (p.mint_0, p.mint_1);
-        Instruction {
-            program_id: PROGRAM_ID,
-            accounts: accounts::PullLegacy {
-                cranker: self.cranker,
-                config: config_pda(),
-                authority: authority(),
-                pool: accounts::RayPool {
-                    pool,
-                    mint_0: m0,
-                    mint_1: m1,
-                    ours_0: self.ours(&m0),
-                    ours_1: self.ours(&m1),
-                    vault_0: p.vault_0,
-                    vault_1: p.vault_1,
-                },
-                slot_0: slot(0),
-                slot_1: slot(1),
-                slot_2: slot(2),
-                fee_0: wp::ata(&fee, &m0, &self.token_program(&m0)),
-                fee_1: wp::ata(&fee, &m1, &self.token_program(&m1)),
-                token_program: TOKEN_PROGRAM,
-                token_2022_program: wp::TOKEN_2022_ID,
-                memo_program: wp::MEMO_ID,
-                system_program: system_program::ID,
-                clmm_program: ray::CLMM_ID,
-            }
-            .to_account_metas(None),
-            data: instruction::PullLegacy {}.data(),
         }
     }
 
@@ -332,7 +265,6 @@ impl<'a, L: Ledger> Crank<'a, L> {
         let c = self.config();
         if c.active_pool == Pubkey::default()
             || !matches!(c.switch.phase, Phase::Idle | Phase::Requested)
-            || self.is_legacy(&c.active_pool)
             || self.position(&c.active_pool, MAIN_SLOT).is_none()
         {
             return None;
@@ -487,17 +419,19 @@ impl<'a, L: Ledger> Crank<'a, L> {
         }
     }
 
-    /// Opens the target pool's sentinel.
+    /// Opens a pool's sentinel: the active pool's when idle, the target's mid-switch.
     pub fn seed_ix(&self) -> Instruction {
         let c = self.config();
-        let pool = expected_pool(&c, &c.switch.target);
+        let quote = if c.switch.phase == Phase::Idle { c.active_quote } else { c.switch.target };
+        let pool = expected_pool(&c, &quote);
         Instruction {
             program_id: PROGRAM_ID,
             accounts: accounts::Seed {
                 funder: self.cranker,
                 config: config_pda(),
                 authority: authority(),
-                pool: self.our_pool_accounts(&c, &c.switch.target),
+                pool: self.our_pool_accounts(&c, &quote),
+                position: Self::slot(&pool, MAIN_SLOT),
                 sentinel: Self::slot(&pool, SENTINEL_SLOT),
                 programs: Self::programs(),
             }
@@ -510,17 +444,16 @@ impl<'a, L: Ledger> Crank<'a, L> {
         let c = self.config();
         let pool = expected_pool(&c, &c.switch.target);
         let mut metas = accounts::Add {
-                funder: self.cranker,
-                config: config_pda(),
-                authority: authority(),
-                pool: self.our_pool_accounts(&c, &c.switch.target),
-                position: Self::slot(&pool, MAIN_SLOT),
-                sentinel: Self::slot(&pool, SENTINEL_SLOT),
-                escrow: escrow(),
-                mint: c.mint,
-                programs: Self::programs(),
-            }
-            .to_account_metas(None);
+            funder: self.cranker,
+            config: config_pda(),
+            authority: authority(),
+            pool: self.our_pool_accounts(&c, &c.switch.target),
+            position: Self::slot(&pool, MAIN_SLOT),
+            escrow: escrow(),
+            mint: c.mint,
+            programs: Self::programs(),
+        }
+        .to_account_metas(None);
         // Token badges for a new pool (Meteora reads the one a token-2022 quote needs).
         for m in [c.mint, c.switch.target] {
             metas.push(AccountMeta::new_readonly(damm::token_badge_address(&m), false));
@@ -528,13 +461,58 @@ impl<'a, L: Ledger> Crank<'a, L> {
         Instruction { program_id: PROGRAM_ID, accounts: metas, data: instruction::Add {}.data() }
     }
 
-    /// Whether `seed` can fund a sentinel from the program's balances in the target pool as it is
-    /// now (mirrors the program's rule).
+    /// Whether `seed` can fund a sentinel from the program's balances (mirrors the program's
+    /// rule): idle, for the active pool from what `add` set aside; mid-switch, for the target.
     pub fn seed_feasible(&self) -> bool {
         let c = self.config();
-        let Some(p) = self.our_pool(&expected_pool(&c, &c.switch.target)) else { return false };
-        let (i, q) = (self.balance(&self.ours(&c.mint)), self.balance(&self.ours(&c.switch.target)));
-        liquidity_for(sentinel_share(i), sentinel_share(q), p.sqrt_price, p.sqrt_min, p.sqrt_max) > 0
+        let idle = c.switch.phase == Phase::Idle;
+        let quote = if idle { c.active_quote } else { c.switch.target };
+        let pool = expected_pool(&c, &quote);
+        let Some(p) = self.our_pool(&pool) else { return false };
+        let (i, q) = (self.balance(&self.ours(&c.mint)), self.balance(&self.ours(&quote)));
+        let l = if idle {
+            let Some(main) = self.position(&pool, MAIN_SLOT) else { return false };
+            liquidity_for(i, q, p.sqrt_price, p.sqrt_min, p.sqrt_max).min(main / SENTINEL_DIVISOR as u128)
+        } else {
+            liquidity_for(sentinel_share(i), sentinel_share(q), p.sqrt_price, p.sqrt_min, p.sqrt_max)
+        };
+        l > 0
+    }
+
+    /// Token accounts a switch needs that don't exist yet (ours along the route, the fee
+    /// recipient's for the pool being left), as idempotent creations.
+    pub fn missing_accounts(&self, e: &Estimate) -> Vec<Instruction> {
+        let c = self.config();
+        let mut mints = vec![c.mint, c.switch.target];
+        for (holding, via) in &e.hops {
+            mints.push(*holding);
+            let v = self.quote(via);
+            mints.push(if *via == *holding { v.hub } else { *via });
+        }
+        mints.sort();
+        mints.dedup();
+        let mut ixs: Vec<Instruction> = mints
+            .iter()
+            .filter(|m| self.ledger.account(&self.ours(m)).is_none())
+            .map(|m| create_ata_ix(&self.cranker, &authority(), m, &self.token_program(m)))
+            .collect();
+        for m in [c.mint, c.active_quote] {
+            if self.ledger.account(&wp::ata(&c.fee_recipient, &m, &self.token_program(&m))).is_none() {
+                ixs.push(create_ata_ix(&self.cranker, &c.fee_recipient, &m, &self.token_program(&m)));
+            }
+        }
+        ixs
+    }
+
+    /// The whole switch as ONE transaction (pull, hops, then reprice and add on the target), or
+    /// an error if it doesn't fit: the program only lets the pull go through together with the
+    /// add, so a switch lands whole or not at all.
+    pub fn switch_tx(&self, e: &Estimate, compact: bool) -> Result<Vec<Instruction>, String> {
+        let txs = pack(self.fast_steps(e, compact), &self.cranker);
+        match <[_; 1]>::try_from(txs) {
+            Ok([(_, ixs)]) => Ok(ixs),
+            Err(txs) => Err(format!("switch needs {} transactions: {:?}", txs.len(), txs.iter().map(|t| &t.0).collect::<Vec<_>>())),
+        }
     }
 
     pub fn abort_ixs(&self) -> Vec<Instruction> {
@@ -573,14 +551,22 @@ impl<'a, L: Ledger> Crank<'a, L> {
         let s = c.switch;
         let expired = self.ledger.now() > s.deadline;
         match s.phase {
-            Phase::Idle => None,
+            // Right after a switch into a new pool: its sentinel, from the share `add` set aside.
+            Phase::Idle => (c.active_pool != Pubkey::default()
+                && self.our_pool(&c.active_pool).is_some()
+                && !self.has_sentinel(&c.active_pool)
+                && self.seed_feasible())
+            .then(|| Action::new("seed", vec![self.seed_ix()])),
             Phase::Requested | Phase::Swapping if expired && s.deadline != 0 => Some(Action::new("abort", self.abort_ixs())),
             Phase::Requested => {
-                let mut ixs = self.fee_atas(&c);
-                ixs.extend(self.legacy_fee_atas(&c));
-                ixs.extend(self.claim_ix());
-                ixs.push(self.pull_ix());
-                Some(Action::new("pull", ixs))
+                let e = self.estimate()?;
+                let prep = self.missing_accounts(&e);
+                if !prep.is_empty() {
+                    return Some(Action::new("prep accounts", prep));
+                }
+                // Not fitting means it can't be done; the request waits out its deadline.
+                let ixs = self.switch_tx(&e, true).or_else(|_| self.switch_tx(&e, false)).ok()?;
+                Some(Action::new("switch", ixs))
             }
             Phase::Swapping => {
                 let via = self.next_via();
@@ -612,15 +598,6 @@ impl<'a, L: Ledger> Crank<'a, L> {
         }
     }
 
-    /// The fee recipient's token accounts for a legacy (Raydium) pool's mints, which `pull_legacy`
-    /// pays fees into.
-    fn legacy_fee_atas(&self, c: &Config) -> Vec<Instruction> {
-        if !self.is_legacy(&c.active_pool) {
-            return vec![];
-        }
-        let Some(p) = self.ledger.account(&c.active_pool).and_then(|(_, d)| ray::parse_pool(&d)) else { return vec![] };
-        [p.mint_0, p.mint_1].iter().map(|m| create_ata_ix(&self.cranker, &c.fee_recipient, m, &self.token_program(m))).collect()
-    }
 }
 
 
@@ -756,21 +733,18 @@ impl<'a, L: Ledger> Crank<'a, L> {
         mints.dedup();
         let mut ixs = self.ensure_ours(&mints);
         ixs.extend(self.fee_atas(&c));
-        ixs.extend(self.legacy_fee_atas(&c));
         out.push(Action::new("prep accounts", ixs));
         out.extend(self.claim_fees());
         out
     }
 
     /// The switch as steps, in order: pull, each hop, then into the target pool. A new pool is
-    /// created by `add` (with its sentinel); a known pool without a sentinel is seeded, then
-    /// repriced; one with a sentinel is repriced. `compact` trims hop swaps to one tick array.
-    /// The keeper packs consecutive steps into as few transactions as the limits allow.
+    /// created by `add` (its sentinel comes after, from idle); a known pool without a sentinel is
+    /// seeded, then repriced; one with a sentinel is repriced. `compact` trims hop swaps to one
+    /// tick array. They have to pack into one transaction (`switch_tx`).
     pub fn fast_steps(&self, e: &Estimate, compact: bool) -> Vec<Step> {
-        let c = self.config();
-        let legacy = self.is_legacy(&c.active_pool);
         // Trace estimates are measured maxima (tests-svm prints them) plus a little slack.
-        let mut steps = vec![Step { label: "pull", ixs: vec![self.pull_ix()], trace: if legacy { 30 } else { 12 } }];
+        let mut steps = vec![Step { label: "pull", ixs: vec![self.pull_ix()], trace: 12 }];
         for (holding, via) in &e.hops {
             steps.push(Step { label: "hop", ixs: vec![self.hop_ix_arrays(*holding, *via, compact)], trace: 5 });
         }
@@ -781,7 +755,7 @@ impl<'a, L: Ledger> Crank<'a, L> {
             steps.push(Step { label: "reprice", ixs: vec![self.reprice_ix()], trace: 5 });
             steps.push(Step { label: "add", ixs: vec![self.add_ix()], trace: 17 });
         } else {
-            steps.push(Step { label: "create pool + add", ixs: vec![self.add_ix()], trace: 40 });
+            steps.push(Step { label: "create pool + add", ixs: vec![self.add_ix()], trace: 28 });
         }
         steps
     }

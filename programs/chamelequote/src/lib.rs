@@ -5,7 +5,6 @@ pub mod error;
 pub mod instructions;
 pub mod math;
 pub mod metaplex;
-pub mod raydium;
 pub mod state;
 pub mod util;
 pub mod validate;
@@ -80,11 +79,6 @@ pub mod chamelequote {
 
     pub fn pull<'info>(ctx: Context<'info, Pull<'info>>) -> Result<()> {
         switch::pull(ctx)
-    }
-
-    /// `pull` from the Raydium pool the liquidity lived in before the move to Meteora DAMM v2.
-    pub fn pull_legacy<'info>(ctx: Context<'info, PullLegacy<'info>>) -> Result<()> {
-        legacy::pull_legacy(ctx)
     }
 
     pub fn hop<'info>(ctx: Context<'info, Hop<'info>>) -> Result<()> {

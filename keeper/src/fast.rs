@@ -1,8 +1,7 @@
-//! Fast switches. Every step of a switch (pull, hops, then create/seed/reprice and add on the
-//! target pool) is built up front from an estimate of where the switch lands, packed into as few
-//! transactions as the 64-account and 64-entry trace limits allow, and sent back to back, each
-//! one as soon as the previous one is processed. Almost every switch fits in ONE transaction, so
-//! it is atomic; the rest take two, and the coin is without liquidity for about a second. Transactions are v0 and use address lookup tables kept
+//! Switches. Every step (pull, hops, then seed/reprice and add on the target pool) goes into ONE
+//! transaction, so a switch lands whole or not at all and the coin never stops trading; the
+//! program refuses a pull without its add. The 64-account and 64-entry trace limits hold for the
+//! longest route (three hops into a new pool). Transactions are v0 and use address lookup tables kept
 //! by this keeper (~/.config/chamelequote/alts.json) to stay under 1232 bytes.
 //!
 //! (Jito bundles were tried first and kept coming back "Invalid" with no reason given; one
@@ -14,7 +13,7 @@ use anchor_lang::{
     prelude::Pubkey,
     solana_program::instruction::{AccountMeta, Instruction},
 };
-use chamelequote_crank::{pack, unique_accounts, Crank, MAX_TX_ACCOUNTS};
+use chamelequote_crank::{unique_accounts, Crank, MAX_TX_ACCOUNTS};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_message::{v0, AddressLookupTableAccount, VersionedMessage};
@@ -233,29 +232,28 @@ pub fn try_fast(rpc: &Rpc, payer: &Keypair, fee: u64) -> Result<bool, String> {
         send(rpc, payer, &a, fee).map_err(|e| format!("{}: {}", a.label, first_line(&e)))?;
     }
 
-    // Built after the prep so they see fresh state; every account goes in the lookup tables
-    // before the pull, so nothing has to be added (and waited on) while the pool is empty.
+    // Built after the prep so it sees fresh state; every account goes in the lookup tables
+    // first. Compact tick arrays for the hops first (fewer accounts), the full sets if a hop
+    // leaves its array.
     let crank = Crank::new(rpc, me);
-    let compact = pack(crank.fast_steps(&est, true), &me);
-    let full = pack(crank.fast_steps(&est, false), &me);
+    let compact = crank.switch_tx(&est, true);
+    let full = crank.switch_tx(&est, false);
     let needed: Vec<Pubkey> =
-        compact.iter().chain(full.iter()).flat_map(|t| t.1.iter()).flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey)).collect();
+        compact.iter().chain(full.iter()).flatten().flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey)).collect();
+    if needed.is_empty() {
+        return Err(compact.err().unwrap_or_default());
+    }
     let alts = ensure_alts(rpc, payer, &needed, fee)?;
-
-    // Only the last transaction needs to be confirmed; each one before it is simulated against
-    // the processed state, so the next can follow right away.
-    let commitment = |plan: &Vec<_>, i: usize| if i + 1 == plan.len() { CommitmentConfig::confirmed() } else { CommitmentConfig::processed() };
-    let mut plan = &compact;
-    let (labels, ixs) = &plan[0];
-    if let Err(e) = send_v0(rpc, payer, &[], &labels.join(" + "), ixs, &alts, 1_400_000, SWITCH_PRIORITY, commitment(plan, 0)) {
-        // Most likely a hop leaving its one tick array: go again with the full sets.
-        log(&format!("compact attempt: {}", first_line(&e)));
-        plan = &full;
-        let (labels, ixs) = &plan[0];
-        send_v0(rpc, payer, &[], &labels.join(" + "), ixs, &alts, 1_400_000, SWITCH_PRIORITY, commitment(plan, 0))?;
+    let confirmed = CommitmentConfig::confirmed();
+    let mut last = String::new();
+    for ixs in [compact, full].into_iter().flatten() {
+        match send_v0(rpc, payer, &[], "switch", &ixs, &alts, 1_400_000, SWITCH_PRIORITY, confirmed) {
+            Ok(_) => return Ok(true),
+            Err(e) => {
+                log(&format!("switch attempt: {}", first_line(&e)));
+                last = e;
+            }
+        }
     }
-    for (i, (labels, ixs)) in plan.iter().enumerate().skip(1) {
-        send_v0(rpc, payer, &[], &labels.join(" + "), ixs, &alts, 1_400_000, SWITCH_PRIORITY, commitment(plan, i))?;
-    }
-    Ok(true)
+    Err(last)
 }

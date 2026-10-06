@@ -66,4 +66,6 @@ pub enum ChameleonError {
     ForeignPool,
     #[msg("The coin would land below that pool's floor; pick another quote")]
     BelowPoolFloor,
+    #[msg("pull must come with add in the same transaction")]
+    NotAtomic,
 }

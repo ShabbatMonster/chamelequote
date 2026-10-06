@@ -80,13 +80,13 @@
           <thead><tr><th scope="col">Step</th><th scope="col">What happens</th></tr></thead>
           <tbody>
             <tr><td>Request</td><td>Your 1,000,000 tokens go into escrow. Only one switch can run at a time.</td></tr>
-            <tr><td>Pull</td><td>All liquidity comes out of the current pool, along with the trading fees it earned. Trading pauses here.</td></tr>
+            <tr><td>Pull</td><td>All liquidity comes out of the current pool, along with the trading fees it earned.</td></tr>
             <tr><td>Hop</td><td>The backing is swapped toward the new quote one Orca pool at a time, through USDC or SOL. This takes one to three swaps.</td></tr>
             <tr><td>Reprice</td><td>Only if the coin has used the new quote's pool before: the pool is moved to the carried-over price (see <a href="#carry">section 3</a>).</td></tr>
-            <tr><td>Add</td><td>Liquidity goes back in, and your escrowed tokens are burned. A new pool is created at the carried-over price, with the floor as its lowest price. 0.1% of the backing (with the matching amount of the coin) stays in every pool for good as a thin position, so the pool can be moved to a new price when the coin comes back; a pool with nothing in it can't be.</td></tr>
+            <tr><td>Add</td><td>Liquidity goes back in, and your escrowed tokens are burned. A new pool is created at the carried-over price, with the floor as its lowest price. Right after, 0.1% of the backing (with the matching amount of the coin) goes into the new pool for good as a thin position, so the pool can be moved to a new price when the coin comes back; a pool with nothing in it can't be.</td></tr>
           </tbody>
         </table>
-        <p>The keeper sends the steps as soon as your request lands. Almost every switch fits in one transaction, so trading never pauses; the rest take two, and trading pauses for about a second. If a switch is not finished within <b>10 minutes</b>, anyone can cancel it: your 1,000,000 tokens are sent back, and the liquidity goes back in against whichever token the backing is held in at that moment.</p>
+        <p>The keeper runs every step in a single transaction as soon as your request lands, and the program won't take the liquidity out any other way. So a switch happens all at once or not at all: trading never pauses. If a switch is not finished within <b>10 minutes</b>, anyone can cancel it: your 1,000,000 tokens are sent back, and the liquidity goes back in against whichever token the backing is held in at that moment.</p>
         <h3>When you can't switch</h3>
         <ul>
           <li>Another switch is already running.</li>

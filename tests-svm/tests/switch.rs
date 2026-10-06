@@ -131,52 +131,65 @@ fn request_needs_warm_averages_and_valid_target() {
 }
 
 #[test]
+fn a_pull_on_its_own_is_refused() {
+    let (mut env, whale) = traded();
+    let x = env.x;
+    env.request(&whale, x).unwrap();
+    let cranker = env.funded();
+    let ix = env.pull_ix(&cranker.pubkey());
+    let err = env.send(&[ix], &[&cranker]).unwrap_err();
+    assert!(err.contains("NotAtomic"), "{err}");
+}
+
+#[test]
 fn pull_refuses_a_manipulated_pool() {
     let (mut env, whale) = traded();
     let x = env.x;
     env.request(&whale, x).unwrap();
-    // Someone pumps the pool hard right before the pull.
+    // Someone pumps the pool hard right before the switch.
     let pumper = env.funded();
     env.buy(&pumper, 200_000 * 1_000_000).unwrap();
     let cranker = env.funded();
-    let ix = env.pull_ix(&cranker.pubkey());
-    let err = env.send(&[ix], &[&cranker]).unwrap_err();
+    let ixs = env.switch_ixs(&cranker);
+    let err = env.send(&ixs, &[&cranker]).unwrap_err();
     assert!(err.contains("PoolManipulated"), "{err}");
 }
 
 #[test]
-fn hop_refuses_a_manipulated_route_pool() {
+fn hop_refuses_a_manipulated_route_pool_and_nothing_moves() {
     let (mut env, whale) = traded();
-    let x = env.x;
+    let (x, usdc) = (env.x, env.usdc);
     env.request(&whale, x).unwrap();
-    let cranker = env.funded();
-    let ix = env.pull_ix(&cranker.pubkey());
-    env.send(&[ix], &[&cranker]).unwrap();
+    let before = env.config().active_pool;
+    let liquidity = env.our_pool(&before).liquidity;
 
-    // Push X/USDC 10% off its average, then try the hop.
+    // Push X/USDC 10% off its average, then try the switch.
     let pusher = env.funded();
     let pool = env.x_pool;
-    let usdc_is_a = env.pool(&pool).mint_a == env.usdc;
-    let usdc = env.usdc;
+    let usdc_is_a = env.pool(&pool).mint_a == usdc;
     env.mint_to(&pusher.pubkey(), &usdc, 2_000_000 * 1_000_000);
     env.user_swap(&pusher, &pool, usdc_is_a, 2_000_000 * 1_000_000).unwrap();
-    let ix = env.hop_ix(x);
-    let err = env.send(&[ix], &[&cranker]).unwrap_err();
+    let cranker = env.funded();
+    let ixs = env.switch_ixs(&cranker);
+    let err = env.send(&ixs, &[&cranker]).unwrap_err();
     assert!(err.contains("RouteOffAverage"), "{err}");
+    // All or nothing: the coin is still trading in its pool.
+    assert_eq!(env.config().active_pool, before);
+    assert_eq!(env.our_pool(&before).liquidity, liquidity);
+    assert_eq!(env.config().switch.phase, Phase::Requested);
 }
 
 #[test]
 fn hop_rejects_the_wrong_route() {
     let (mut env, whale) = traded();
-    let x = env.x;
+    let (x, y) = (env.x, env.y);
     env.request(&whale, x).unwrap();
     let cranker = env.funded();
-    let ix = env.pull_ix(&cranker.pubkey());
-    env.send(&[ix], &[&cranker]).unwrap();
+    let mut ixs = env.switch_ixs(&cranker);
     // Holding USDC, target X: going through Y's pool is not a step toward X.
-    let y = env.y;
-    let ix = env.hop_ix(y);
-    let err = env.send(&[ix], &[&cranker]).unwrap_err();
+    let wrong = env.hop_ix(y);
+    ixs[1] = wrong;
+    let err = env.send(&ixs, &[&cranker]).unwrap_err();
     assert!(err.contains("WrongHop"), "{err}");
 }
 
@@ -186,31 +199,31 @@ fn crank_cannot_redirect_funds() {
     let x = env.x;
     env.request(&whale, x).unwrap();
     let thief = env.funded();
-    let mut ix = env.pull_ix(&thief.pubkey());
-    // Swap the program's USDC account (ours_b or ours_a) for the thief's own.
+    let mut ixs = env.switch_ixs(&thief);
+    // Swap the program's USDC account in the pull for the thief's own.
     let usdc = env.usdc;
     let thief_usdc = env.ensure_ata(&thief.pubkey(), &usdc);
     let ours_usdc = chamelequote::whirlpool::ata(&authority(), &usdc, &anchor_spl::token::spl_token::ID);
-    for m in ix.accounts.iter_mut() {
+    for m in ixs[0].accounts.iter_mut() {
         if m.pubkey == ours_usdc {
             m.pubkey = thief_usdc;
         }
     }
-    let err = env.send(&[ix], &[&thief]).unwrap_err();
+    let err = env.send(&ixs, &[&thief]).unwrap_err();
     assert!(err.contains("WrongTokenAccount"), "{err}");
 }
 
 #[test]
-fn abort_refunds_and_lands_where_the_backing_is() {
+fn a_switch_that_cannot_land_is_refunded_and_the_coin_never_stops_trading() {
     for order in ORDERS {
         let (mut env, whale) = traded_ordered(order);
         let whale_token = chamelequote::whirlpool::ata(&whale.pubkey(), &env.mint, &anchor_spl::token::spl_token::ID);
-        let usd0 = env.index_usd();
-        let y = env.y;
+        let (x, usdc) = (env.x, env.usdc);
+        let pool = env.config().active_pool;
 
-        // Request -> abort before anything happened.
+        // Request -> abort before the deadline is refused; after it, refunded.
         let bal = env.balance(&whale_token);
-        env.request(&whale, y).unwrap();
+        env.request(&whale, x).unwrap();
         let ix = env.abort_ix();
         assert!(env.send(&[ix], &[&env.admin.insecure_clone()]).unwrap_err().contains("NotExpired"));
         env.warp(601);
@@ -220,30 +233,24 @@ fn abort_refunds_and_lands_where_the_backing_is() {
         assert_eq!(env.balance(&whale_token), bal, "refunded");
         assert_eq!(env.config().switch.phase, Phase::Idle);
 
-        // Request -> pull -> one hop (USDC -> WSOL) -> stall -> abort: backing lands in WSOL.
+        // A route pushed off its average blocks the switch; the keeper keeps trying until the
+        // deadline and then cancels it. The coin trades in its pool the whole time.
         env.keep(660);
-        env.request(&whale, y).unwrap();
-        let cranker = env.funded();
-        let ix = env.pull_ix(&cranker.pubkey());
-        env.send(&[ix], &[&cranker]).unwrap();
-        env.poke_quotes();
-        let via = env.next_via();
-        let ix = env.hop_ix(via);
-        env.send(&[ix], &[&cranker]).unwrap();
-        assert_eq!(env.config().switch.holding, env.wsol);
+        env.request(&whale, x).unwrap();
+        let pusher = env.funded();
+        let route = env.x_pool;
+        let usdc_is_a = env.pool(&route).mint_a == usdc;
+        env.mint_to(&pusher.pubkey(), &usdc, 2_000_000 * 1_000_000);
+        env.user_swap(&pusher, &route, usdc_is_a, 2_000_000 * 1_000_000).unwrap();
+        assert!(env.crank().is_err(), "the switch can't land");
+        env.buy(&whale, 1_000_000).unwrap(); // still trading
+        let held = env.balance(&whale_token);
         env.warp(601);
-        let ix = env.abort_ix();
-        env.send(&[ix], &[&admin]).unwrap();
-        assert_eq!(env.balance(&whale_token), bal, "refunded again");
         env.crank().unwrap();
         let c = env.config();
-        assert_eq!(c.active_quote, env.wsol);
-        assert_eq!(c.quote_changes, 0, "aborted switches burn nothing");
-        // Supply untouched: launch-time supply minus nothing.
-        assert_eq!(env.supply(), SUPPLY);
-        // Value roughly kept (keep() pokes moved time, not prices).
-        let usd = env.index_usd();
-        assert!((usd / usd0 - 1.0).abs() < 0.02, "{usd} vs {usd0}");
+        assert_eq!((c.switch.phase, c.active_pool, c.quote_changes), (Phase::Idle, pool, 0));
+        assert_eq!(env.balance(&whale_token), held + BURN, "refunded again");
+        assert_eq!(env.supply(), SUPPLY, "nothing burned");
     }
 }
 
@@ -383,6 +390,8 @@ fn fast_switch(env: &mut Env, target: anchor_lang::prelude::Pubkey) -> usize {
     let c = env.config();
     assert_eq!(c.switch.phase, Phase::Idle);
     assert_eq!(c.active_quote, target);
+    // The new pool's sentinel, right after.
+    env.crank().unwrap();
     txs.len()
 }
 
@@ -392,11 +401,21 @@ fn fast_switches_pack_into_few_transactions() {
         let (mut env, whale) = traded_ordered(order);
         let (x, wsol, y, usdc) = (env.x, env.wsol, env.y, env.usdc);
         let usd0 = env.index_usd();
+        // A second USDC-hub stock, for three hops into a pool that doesn't exist yet.
+        let z = env.create_mint(8);
+        let route = env.init_pool(&z, &usdc, TS_ROUTE, pool_sqrt(&z, &usdc, 2, 1));
+        let (stock, dollars) = (50_000 * 100_000_000u64, 10_000_000 * 1_000_000u64);
+        let (a, b) = if env.pool(&route).mint_a == z { (stock, dollars) } else { (dollars, stock) };
+        env.add_lp(&route, a, b);
+        env.list_quote(z, Some((usdc, route)));
+        env.extra_quotes.push(z);
+        env.keep(660);
         let plan = [
             ("USDC->X (new pool)", x, 1),
             ("X->SOL (new pool, 2 hops)", wsol, 1),
             ("SOL->Y (new pool)", y, 1),
-            ("Y->X (revisit, 3 hops)", x, 1),
+            ("Y->Z (new pool, 3 hops)", z, 1),
+            ("Z->X (revisit, 2 hops)", x, 1),
             ("X->USDC (revisit, no sentinel yet)", usdc, 1),
             ("USDC->X (revisit, 1 hop)", x, 1),
         ];
@@ -407,7 +426,7 @@ fn fast_switches_pack_into_few_transactions() {
             assert!(n <= txs, "{name}: {n} transactions");
             env.keep(660);
         }
-        assert_close(env.index_usd(), usd0, 0.05, "after six fast switches");
+        assert_close(env.index_usd(), usd0, 0.06, "after seven fast switches");
     }
 }
 
@@ -424,8 +443,8 @@ fn revisits_reprice_through_the_sentinel() {
         // X -> USDC: back to the launch pool, which had no sentinel (no backing at launch).
         env.request(&whale, usdc).unwrap();
         env.crank().unwrap();
-        let labels: Vec<_> = env.crank_cu.iter().map(|s| s.0).collect();
-        assert!(labels.contains(&"seed") && labels.contains(&"reprice"), "{labels:?}");
+        let steps = env.crank_steps.clone();
+        assert!(steps.contains(&"seed") && steps.contains(&"reprice"), "{steps:?}");
         // The X pool keeps only its sentinel, so it stays tradeable.
         assert!(env.our_pool(&x_pool).liquidity > 0, "sentinel left in the X pool");
         // Move X so the way back lands at a different price, then go back.
@@ -438,8 +457,8 @@ fn revisits_reprice_through_the_sentinel() {
         let usd0 = env.index_usd();
         env.request(&whale, x).unwrap();
         env.crank().unwrap();
-        let labels: Vec<_> = env.crank_cu.iter().map(|s| s.0).collect();
-        assert!(labels.contains(&"reprice") && !labels.contains(&"seed"), "{labels:?}");
+        let steps = env.crank_steps.clone();
+        assert!(steps.contains(&"reprice") && !steps.contains(&"seed"), "{steps:?}");
         assert_eq!(env.config().active_pool, x_pool);
         assert_close(env.index_usd(), usd0, 0.02, "back in the X pool at the new price");
         env.buy(&whale, 1_000_000).unwrap();
@@ -517,4 +536,27 @@ fn switches_into_and_out_of_a_token_2022_stock() {
     env.crank().unwrap();
     assert_eq!(env.config().active_quote, usdc);
     assert_close(env.index_usd(), usd1, 0.02, "and back");
+}
+
+#[test]
+fn a_new_pool_costs_the_requester_its_rent_and_a_known_one_costs_nothing() {
+    let mut env = Env::launched();
+    let whale = env.funded();
+    env.buy(&whale, 50_000 * 1_000_000).unwrap();
+    env.keep(1800);
+    let (x, usdc) = (env.x, env.usdc);
+    let fee = env.fee_recipient.pubkey();
+    let lamports = |env: &Env, k: &anchor_lang::prelude::Pubkey| env.svm.get_account(k).map(|a| a.lamports).unwrap_or(0);
+
+    let (w0, f0) = (lamports(&env, &whale.pubkey()), lamports(&env, &fee));
+    env.request(&whale, x).unwrap();
+    assert_eq!(lamports(&env, &fee) - f0, chamelequote::state::NEW_POOL_FEE_LAMPORTS);
+    assert!(w0 - lamports(&env, &whale.pubkey()) >= chamelequote::state::NEW_POOL_FEE_LAMPORTS);
+    env.crank().unwrap();
+    env.keep(660);
+
+    // Back to the USDC pool, which exists: no fee.
+    let f1 = lamports(&env, &fee);
+    env.request(&whale, usdc).unwrap();
+    assert_eq!(lamports(&env, &fee), f1);
 }

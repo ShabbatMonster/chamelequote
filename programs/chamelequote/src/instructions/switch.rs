@@ -12,15 +12,17 @@
 //! Our pools are Meteora DAMM v2 customizable pools (one per quote, our token as token A); route
 //! pools are Orca Whirlpools. `add` creates a new pool at the target price with the floor as its
 //! lower bound. A pool the coin has used before keeps its range and price: `reprice` swaps it to
-//! the target through the "sentinel", a small position that `add` (or `seed`) leaves in every
-//! pool for good, since a pool with no liquidity cannot be moved.
+//! the target through the "sentinel", a small position that `seed` leaves in every pool for good
+//! (right after the switch that created it), since a pool with no liquidity cannot be moved.
 //!
-//! While a switch is in flight the pool is empty, so the keeper sends the steps back to back. A
-//! switch not finished by its deadline can be aborted by anyone: the burn is refunded and the
-//! backing is laid into whatever quote it is held in at that point.
+//! `pull` only goes through in a transaction that also runs `add`, so a switch lands whole or not
+//! at all: the coin is never without liquidity. A switch that can't land by its deadline is
+//! aborted by anyone and the burn refunded.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{program::invoke, system_instruction};
+use solana_instructions_sysvar as ix_sysvar;
+use anchor_lang::Discriminator;
 use anchor_spl::token::{self, Burn, Token, Transfer};
 
 use crate::{
@@ -490,17 +492,36 @@ pub struct Pull<'info> {
     #[account(mut)]
     pub fee_quote: UncheckedAccount<'info>,
 
+    /// CHECK: address checked; read to find the `add` this pull must come with.
+    #[account(address = ix_sysvar::ID)]
+    pub instructions: UncheckedAccount<'info>,
+
     pub programs: Programs<'info>,
 }
 
+/// Whether one of this program's `add` instructions comes later in the current transaction.
+fn add_follows(instructions: &AccountInfo) -> Result<bool> {
+    let current = ix_sysvar::load_current_index_checked(instructions)? as usize;
+    let mut i = current + 1;
+    while let Ok(ix) = ix_sysvar::load_instruction_at_checked(i, instructions) {
+        if ix.program_id == crate::ID && ix.data.starts_with(crate::instruction::Add::DISCRIMINATOR) {
+            return Ok(true);
+        }
+        i += 1;
+    }
+    Ok(false)
+}
+
 /// Takes the liquidity out of the active pool and closes the position (the sentinel stays).
-/// Fees earned since the last claim are paid out as usual.
+/// Fees earned since the last claim are paid out as usual. Only in a transaction that also
+/// runs `add`: the switch lands whole or not at all.
 pub fn pull<'info>(ctx: Context<'info, Pull<'info>>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let config = &ctx.accounts.config;
     require!(config.switch.phase == Phase::Requested, E::WrongPhase);
     let pool_key = ctx.accounts.pool.pool.key();
     require_keys_eq!(pool_key, config.active_pool, E::WrongPool);
+    require!(add_follows(&ctx.accounts.instructions)?, E::NotAtomic);
     let authority = ctx.accounts.authority.key();
     let quote = config.active_quote;
     let (state, sides) = ctx.accounts.pool.load(config, &quote, &authority)?;
@@ -777,25 +798,39 @@ pub struct Seed<'info> {
     pub authority: UncheckedAccount<'info>,
 
     pub pool: OurPool<'info>,
+    /// The pool's main position (read in the idle case to size the sentinel).
+    pub position: Slot<'info>,
     pub sentinel: Slot<'info>,
     pub programs: Programs<'info>,
 }
 
-/// Opens the sentinel of a pool the coin has used before but that has none, at whatever price
-/// the pool has, so `reprice` has something to swap through. `add` opens it for new pools.
+/// Opens a pool's sentinel, a full-range position that stays for good so `reprice` has something
+/// to swap through when the coin comes back. Normally right after the switch that created the
+/// pool (idle, on the active pool), from the share `add` set aside: at most 1/SENTINEL_DIVISOR
+/// of the main position, so idle backing is never locked away. Also, mid-switch, for a pool the
+/// coin used before that has none, at whatever price the pool has.
 pub fn seed<'info>(ctx: Context<'info, Seed<'info>>) -> Result<()> {
     let config = &ctx.accounts.config;
-    require!(config.switch.phase == Phase::Repricing, E::WrongPhase);
-    let target = config.switch.target;
+    let idle = config.switch.phase == Phase::Idle;
+    require!(idle || config.switch.phase == Phase::Repricing, E::WrongPhase);
+    let quote_mint = if idle { config.active_quote } else { config.switch.target };
     let authority = ctx.accounts.authority.key();
-    let (state, sides) = ctx.accounts.pool.load(config, &target, &authority)?;
+    let (state, sides) = ctx.accounts.pool.load(config, &quote_mint, &authority)?;
     let ps = state.ok_or(E::WrongPool)?;
     let pool_key = sides.pool;
+    if idle {
+        require_keys_eq!(pool_key, config.active_pool, E::WrongPool);
+    }
     if ctx.accounts.sentinel.check(&pool_key, SENTINEL_SLOT)?.is_some() {
         return Ok(());
     }
     let (index, quote) = ctx.accounts.pool.balances()?;
-    let l = liquidity_for(sentinel_share(index), sentinel_share(quote), ps.sqrt_price, ps.sqrt_min, ps.sqrt_max);
+    let l = if idle {
+        let main = ctx.accounts.position.check(&pool_key, MAIN_SLOT)?.ok_or(E::BadPosition)?;
+        liquidity_for(index, quote, ps.sqrt_price, ps.sqrt_min, ps.sqrt_max).min(main / SENTINEL_DIVISOR as u128)
+    } else {
+        liquidity_for(sentinel_share(index), sentinel_share(quote), ps.sqrt_price, ps.sqrt_min, ps.sqrt_max)
+    };
     require!(l > 0, E::NothingToReprice);
     fund_authority(&ctx.accounts.funder, &ctx.accounts.authority, &ctx.accounts.programs.system_program, Slot::rent()?)?;
     let infos = ctx.accounts.to_account_infos();
@@ -843,7 +878,6 @@ pub struct Add<'info> {
 
     pub pool: OurPool<'info>,
     pub position: Slot<'info>,
-    pub sentinel: Slot<'info>,
 
     /// CHECK: PDA.
     #[account(mut, seeds = [ESCROW_SEED], bump = config.escrow_bump)]
@@ -858,8 +892,8 @@ pub struct Add<'info> {
 }
 
 /// Lays the backing and every index token into the target pool. A new pool is created at the
-/// target price with the floor that the backing reaches as its lower bound, and gets its
-/// sentinel here too. A pool used before keeps its range: it must be at the target already
+/// target price with the floor that the backing reaches as its lower bound (its sentinel's
+/// share stays aside for `seed`). A pool used before keeps its range: it must be at the target already
 /// (`reprice`), and whatever its range can't take of one side stays with the program until the
 /// next switch.
 pub fn add<'info>(ctx: Context<'info, Add<'info>>) -> Result<()> {
@@ -879,17 +913,16 @@ pub fn add<'info>(ctx: Context<'info, Add<'info>>) -> Result<()> {
             let p = config.switch.target_index_sqrt.clamp(damm::MIN_SQRT_PRICE + 1, damm::MAX_SQRT_PRICE / 2);
             // DAMM moves at least one unit of each token into a new pool.
             require!(quote > 0 && index > 0, E::NothingToReprice);
-            // The sentinel needs some quote of its own, with at least a unit left for the pool.
-            let with_sentinel = ctx.accounts.sentinel.check(&pool_key, SENTINEL_SLOT)?.is_none() && quote >= 2;
+            // The sentinel's share stays with the program for `seed`, which runs right after
+            // (outside this transaction, which has to fit the whole switch). It needs some quote
+            // of its own, with at least a unit left for the pool.
+            let with_sentinel = quote >= 2;
             let (si, sq) = if with_sentinel { (sentinel_share(index), sentinel_share(quote).min(quote - 1)) } else { (0, 0) };
             let (main_index, main_quote) = (index - si, (quote - sq).max(1));
             let l = damm::liquidity_from_a(main_index, p, damm::MAX_SQRT_PRICE);
             let l = l.saturating_sub(l / 1_000_000 + 1);
             let sqrt_min = damm::floor_for(main_quote, l, p).min(p);
-            let mut need = rent.minimum_balance(damm::POOL_LEN) + 2 * rent.minimum_balance(damm::TOKEN_ACCOUNT_LEN) + Slot::rent()?;
-            if with_sentinel {
-                need += Slot::rent()?;
-            }
+            let need = rent.minimum_balance(damm::POOL_LEN) + 2 * rent.minimum_balance(damm::TOKEN_ACCOUNT_LEN) + Slot::rent()?;
             fund_authority(&ctx.accounts.funder, &ctx.accounts.authority, &ctx.accounts.programs.system_program, need)?;
             let mut infos = ctx.accounts.to_account_infos();
             infos.extend_from_slice(ctx.remaining_accounts);
@@ -899,13 +932,6 @@ pub fn add<'info>(ctx: Context<'info, Add<'info>>) -> Result<()> {
             let mint_seeds: &[&[u8]] = &[POSITION_MINT_SEED, pool_key.as_ref(), &idx, &mb];
             let ix = damm::create_pool_ix(authority, nft, &sides, sqrt_min, p, l);
             wp::invoke(&ix, &infos, &[auth_seeds, mint_seeds])?;
-            if with_sentinel {
-                let (index, quote) = ctx.accounts.pool.balances()?;
-                let ls = liquidity_for(index.min(si), quote.min(sq), p, sqrt_min, damm::MAX_SQRT_PRICE);
-                if ls > 0 {
-                    open(&ctx.accounts.sentinel, &sides, SENTINEL_SLOT, ls, index, quote, authority, &infos, auth_seeds)?;
-                }
-            }
             (p, sqrt_min)
         }
         Some(ps) => {

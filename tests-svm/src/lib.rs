@@ -23,7 +23,6 @@ use chamelequote::{
     math,
     metaplex::{metadata_address, TOKEN_METADATA_ID},
     damm,
-    raydium as ray,
     state::{Config, QuoteEntry, AUTHORITY_SEED, CONFIG_SEED, ESCROW_SEED, QUOTE_SEED},
     whirlpool::{self as wp, PoolState, Sides},
     ID as PROGRAM_ID,
@@ -108,6 +107,8 @@ pub struct Env {
     pub last_trace: usize,
     /// (step, compute units) of the last `crank`.
     pub crank_cu: Vec<(&'static str, u64)>,
+    /// The program's instructions the last `crank` sent, by name, in order.
+    pub crank_steps: Vec<&'static str>,
 }
 
 impl Env {
@@ -179,11 +180,6 @@ impl Env {
     /// One of our DAMM v2 pools.
     pub fn our_pool(&self, pool: &Pubkey) -> damm::PoolState {
         damm::parse_pool(&self.svm.get_account(pool).unwrap().data).unwrap()
-    }
-
-    /// A Raydium pool (the venue before DAMM v2, for the migration test).
-    pub fn ray_pool(&self, pool: &Pubkey) -> ray::PoolState {
-        ray::parse_pool(&self.svm.get_account(pool).unwrap().data).unwrap()
     }
 
     pub fn create_mint(&mut self, decimals: u8) -> Pubkey {
@@ -394,52 +390,16 @@ impl Env {
         self.send(&[damm::swap_ix(user.pubkey(), &sides, a_to_b, amount, 0)], &[user])
     }
 
-    /// A plain user trade through a Raydium pool, as far as `amount` goes (or to `limit` if
-    /// non-zero).
-    pub fn ray_swap(&mut self, user: &Keypair, pool: &Pubkey, zero_for_one: bool, amount: u64, limit: u128) -> Result<(), String> {
-        let p = self.ray_pool(pool);
-        self.ensure_ata(&user.pubkey(), &p.mint_0);
-        self.ensure_ata(&user.pubkey(), &p.mint_1);
-        let sides = ray::Sides {
-            mint: [p.mint_0, p.mint_1],
-            program: [spl_token::ID; 2],
-            ours: [ata(&user.pubkey(), &p.mint_0), ata(&user.pubkey(), &p.mint_1)],
-            vault: [p.vault_0, p.vault_1],
-        };
-        let ts = p.tick_spacing as i32;
-        let current = ray::tick_array_start(p.tick_current, ts);
-        let starts = ray::initialized_tick_arrays(&self.svm.get_account(pool).unwrap().data, ts);
-        let path: Vec<i32> = if zero_for_one {
-            starts.into_iter().rev().filter(|s| *s <= current).collect()
-        } else {
-            starts.into_iter().filter(|s| *s >= current).collect()
-        };
-        let arrays: Vec<Pubkey> = path.into_iter().take(10).map(|s| ray::tick_array_address(pool, s)).collect();
-        let ix = ray::swap_ix(user.pubkey(), p.amm_config, *pool, &sides, zero_for_one, amount, 0, limit, &arrays);
-        self.send(&[ix], &[user])
-    }
-
-    fn active_is_raydium(&self) -> bool {
-        self.svm.get_account(&self.config().active_pool).is_some_and(|a| a.owner == ray::CLMM_ID)
-    }
-
     /// Buys our token with `amount` of the active quote.
     pub fn buy(&mut self, user: &Keypair, amount: u64) -> Result<(), String> {
         let c = self.config();
         self.mint_to(&user.pubkey(), &c.active_quote, amount);
-        if self.active_is_raydium() {
-            // Paying quote: token 1 when our token is token 0.
-            return self.ray_swap(user, &c.active_pool, !c.index_is_a(&c.active_quote), amount, 0);
-        }
         self.our_swap(user, &c.active_pool, false, amount)
     }
 
     /// Sells `amount` of our token into the active pool.
     pub fn sell(&mut self, user: &Keypair, amount: u64) -> Result<(), String> {
         let c = self.config();
-        if self.active_is_raydium() {
-            return self.ray_swap(user, &c.active_pool, c.index_is_a(&c.active_quote), amount, 0);
-        }
         self.our_swap(user, &c.active_pool, true, amount)
     }
 
@@ -463,9 +423,8 @@ impl Env {
         svm.add_program_from_file(PROGRAM_ID, program).unwrap();
         svm.add_program_from_file(TOKEN_METADATA_ID, "fixtures/mpl_token_metadata.so").unwrap();
         svm.add_program_from_file(wp::WHIRLPOOL_ID, "fixtures/whirlpool.so").unwrap();
-        svm.add_program_from_file(ray::CLMM_ID, "fixtures/raydium_clmm.so").unwrap();
         svm.add_program_from_file(damm::DAMM_ID, "fixtures/damm_v2.so").unwrap();
-        for (file, owner) in [("fixtures/whirlpool_accounts.json", wp::WHIRLPOOL_ID), ("fixtures/raydium_accounts.json", ray::CLMM_ID)] {
+        for (file, owner) in [("fixtures/whirlpool_accounts.json", wp::WHIRLPOOL_ID)] {
             let fixtures: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
             for (_, v) in fixtures.as_object().unwrap() {
                 let address: Pubkey = v["address"].as_str().unwrap().parse().unwrap();
@@ -500,6 +459,7 @@ impl Env {
             last_cu: 0,
             last_trace: 0,
             crank_cu: vec![],
+            crank_steps: vec![],
         };
         let lp = env.lp.pubkey();
         env.svm.airdrop(&lp, 100_000_000_000).unwrap();
@@ -693,6 +653,17 @@ impl Env {
         self.crank_as(cranker).pull_ix()
     }
 
+    /// The whole switch as the keeper sends it (one transaction), creating the token accounts it
+    /// needs first.
+    pub fn switch_ixs(&mut self, cranker: &Kp) -> Vec<Instruction> {
+        let est = self.crank_as(&cranker.pubkey()).estimate().expect("a requested switch");
+        let prep = self.crank_as(&cranker.pubkey()).missing_accounts(&est);
+        if !prep.is_empty() {
+            self.send(&prep, &[cranker]).unwrap();
+        }
+        self.crank_as(&cranker.pubkey()).switch_tx(&est, false).unwrap()
+    }
+
     pub fn next_via(&self) -> Pubkey {
         self.crank_as(&Pubkey::default()).next_via()
     }
@@ -721,6 +692,7 @@ impl Env {
     /// number of hops taken; `crank_cu` records (step, compute units).
     pub fn crank(&mut self) -> Result<usize, String> {
         self.crank_cu.clear();
+        self.crank_steps.clear();
         let cranker = self.funded();
         let mut hops = 0;
         for _ in 0..30 {
@@ -730,8 +702,22 @@ impl Env {
             self.send(&action.ixs, &signers).map_err(|e| format!("{}: {e}", action.label))?;
             self.crank_cu.push((action.label, self.last_cu));
             eprintln!("  crank {}: {} CU, {} trace, {} accounts", action.label, self.last_cu, self.last_trace, chamelequote_crank::unique_accounts(&action.ixs, &cranker.pubkey()));
-            if action.label == "hop" {
-                hops += 1;
+            for ix in action.ixs.iter().filter(|ix| ix.program_id == PROGRAM_ID) {
+                use anchor_lang::Discriminator;
+                let names: [(&[u8], &'static str); 6] = [
+                    (instruction::Pull::DISCRIMINATOR, "pull"),
+                    (instruction::Hop::DISCRIMINATOR, "hop"),
+                    (instruction::Seed::DISCRIMINATOR, "seed"),
+                    (instruction::Reprice::DISCRIMINATOR, "reprice"),
+                    (instruction::Add::DISCRIMINATOR, "add"),
+                    (instruction::Abort::DISCRIMINATOR, "abort"),
+                ];
+                if let Some((_, name)) = names.iter().find(|(d, _)| ix.data.starts_with(d)) {
+                    self.crank_steps.push(name);
+                    if *name == "hop" {
+                        hops += 1;
+                    }
+                }
             }
         }
         Err("crank did not finish".into())
