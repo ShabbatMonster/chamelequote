@@ -1,154 +1,176 @@
-//! The one step that still touches an Orca pool of ours: pulling the liquidity out of the
-//! Whirlpool it lived in before the move to Raydium. The next switch after the upgrade runs
-//! `pull_legacy` instead of `pull`; everything after that is Raydium. Can go in a later upgrade.
+//! The one step that still touches a Raydium pool of ours: pulling the liquidity out of the
+//! Raydium CLMM pool it lived in before the move to Meteora DAMM v2. The next switch after the
+//! upgrade runs `pull_legacy` instead of `pull`; everything after that is DAMM v2. It also takes
+//! back the sentinel position Raydium pools needed. Can go in a later upgrade.
 
 use anchor_lang::prelude::*;
 
-use crate::{
-    error::ChameleonError as E,
-    math,
-    state::*,
-    util,
-    whirlpool as wp,
-};
+use crate::{error::ChameleonError as E, math, raydium as ray, state::*, util, whirlpool as wp};
 
-use super::switch::*;
+use super::switch::{pay_fee_share, position_mint_address};
 
-/// Our two position slots in an Orca pool (mint, position, NFT account, tick arrays at both ends).
+/// The Raydium pool (token 0/1 in sorted order) and the program's token account for each side.
 #[derive(Accounts)]
-pub struct OrcaPositions<'info> {
-    /// CHECK: PDA, verified against the pool.
+pub struct RayPool<'info> {
+    /// CHECK: must be the active pool; `load` checks owner and contents.
     #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+    /// CHECK: must be token 0 of the pool.
     pub mint_0: UncheckedAccount<'info>,
-    /// CHECK: Orca position PDA.
-    #[account(mut)]
-    pub position_0: UncheckedAccount<'info>,
-    /// CHECK: authority's token-2022 ATA for mint_0.
-    #[account(mut)]
-    pub nft_0: UncheckedAccount<'info>,
-    /// CHECK: Orca validates.
-    #[account(mut)]
-    pub lower_0: UncheckedAccount<'info>,
-    /// CHECK: Orca validates.
-    #[account(mut)]
-    pub upper_0: UncheckedAccount<'info>,
-    /// CHECK: PDA, verified against the pool.
-    #[account(mut)]
+    /// CHECK: must be token 1 of the pool.
     pub mint_1: UncheckedAccount<'info>,
-    /// CHECK: Orca position PDA.
+    /// CHECK: must be the authority's ATA for mint 0.
     #[account(mut)]
-    pub position_1: UncheckedAccount<'info>,
-    /// CHECK: authority's token-2022 ATA for mint_1.
+    pub ours_0: UncheckedAccount<'info>,
+    /// CHECK: must be the authority's ATA for mint 1.
     #[account(mut)]
-    pub nft_1: UncheckedAccount<'info>,
-    /// CHECK: Orca validates.
+    pub ours_1: UncheckedAccount<'info>,
+    /// CHECK: must be the pool's vault 0.
     #[account(mut)]
-    pub lower_1: UncheckedAccount<'info>,
-    /// CHECK: Orca validates.
+    pub vault_0: UncheckedAccount<'info>,
+    /// CHECK: must be the pool's vault 1.
     #[account(mut)]
-    pub upper_1: UncheckedAccount<'info>,
+    pub vault_1: UncheckedAccount<'info>,
 }
 
-impl<'info> OrcaPositions<'info> {
-    /// (position mint, position account, lower tick array, upper tick array) for slot `i`,
-    /// after checking the mint is our PDA for `pool` and the position is the one Orca derives.
-    fn slot(&self, pool: &Pubkey, i: u8) -> Result<(Pubkey, &AccountInfo<'info>, Pubkey, Pubkey)> {
-        let (mint, position, lower, upper) = if i == 0 {
-            (&self.mint_0, &self.position_0, &self.lower_0, &self.upper_0)
-        } else {
-            (&self.mint_1, &self.position_1, &self.lower_1, &self.upper_1)
-        };
-        require_keys_eq!(mint.key(), position_mint_address(pool, i).0, E::BadPosition);
-        require_keys_eq!(position.key(), wp::position_address(&mint.key()), E::BadPosition);
-        Ok((mint.key(), position.as_ref(), lower.key(), upper.key()))
+/// One Raydium position slot: NFT mint (our PDA), the authority's NFT account, Raydium's
+/// position account, and the tick arrays holding both ends.
+#[derive(Accounts)]
+pub struct RaySlot<'info> {
+    /// CHECK: PDA, verified against the pool.
+    #[account(mut)]
+    pub nft_mint: UncheckedAccount<'info>,
+    /// CHECK: authority's token-2022 ATA for the NFT; Raydium checks it.
+    #[account(mut)]
+    pub nft_account: UncheckedAccount<'info>,
+    /// CHECK: Raydium position PDA of the NFT mint.
+    #[account(mut)]
+    pub personal: UncheckedAccount<'info>,
+    /// CHECK: Raydium validates.
+    #[account(mut)]
+    pub lower: UncheckedAccount<'info>,
+    /// CHECK: Raydium validates.
+    #[account(mut)]
+    pub upper: UncheckedAccount<'info>,
+}
+
+impl<'info> RaySlot<'info> {
+    fn check(&self, pool: &Pubkey, i: u8) -> Result<ray::Slot> {
+        require_keys_eq!(self.nft_mint.key(), position_mint_address(pool, i).0, E::BadPosition);
+        require_keys_eq!(self.personal.key(), ray::personal_position_address(&self.nft_mint.key()), E::BadPosition);
+        Ok(ray::Slot { nft_mint: self.nft_mint.key(), lower_array: self.lower.key(), upper_array: self.upper.key() })
     }
 }
 
 #[derive(Accounts)]
 pub struct PullLegacy<'info> {
-    /// Receives the rent of the closed positions.
-    #[account(mut)]
     pub cranker: Signer<'info>,
 
     #[account(mut)]
     pub config: Box<Account<'info, Config>>,
 
-    /// CHECK: PDA signer.
-    #[account(seeds = [AUTHORITY_SEED], bump = config.authority_bump)]
+    /// CHECK: PDA signer; receives the closed positions' rent.
+    #[account(mut, seeds = [AUTHORITY_SEED], bump = config.authority_bump)]
     pub authority: UncheckedAccount<'info>,
 
-    pub pool: PoolSides<'info>,
-    pub positions: OrcaPositions<'info>,
+    pub pool: RayPool<'info>,
+    /// Index position, backing position, sentinel.
+    pub slot_0: RaySlot<'info>,
+    pub slot_1: RaySlot<'info>,
+    pub slot_2: RaySlot<'info>,
 
-    /// CHECK: fee recipient's ATA for mint A (only checked when a share is paid).
+    /// CHECK: fee recipient's ATA for mint 0 (checked when a share is paid).
     #[account(mut)]
-    pub fee_a: UncheckedAccount<'info>,
-    /// CHECK: fee recipient's ATA for mint B (only checked when a share is paid).
+    pub fee_0: UncheckedAccount<'info>,
+    /// CHECK: fee recipient's ATA for mint 1 (checked when a share is paid).
     #[account(mut)]
-    pub fee_b: UncheckedAccount<'info>,
+    pub fee_1: UncheckedAccount<'info>,
 
+    pub token_program: Program<'info, anchor_spl::token::Token>,
     /// CHECK: address checked.
     #[account(address = wp::TOKEN_2022_ID)]
     pub token_2022_program: UncheckedAccount<'info>,
     /// CHECK: address checked.
     #[account(address = wp::MEMO_ID)]
     pub memo_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
     /// CHECK: address checked.
-    #[account(address = wp::WHIRLPOOL_ID)]
-    pub whirlpool_program: UncheckedAccount<'info>,
+    #[account(address = ray::CLMM_ID)]
+    pub clmm_program: UncheckedAccount<'info>,
 }
 
 pub fn pull_legacy<'info>(ctx: Context<'info, PullLegacy<'info>>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let config = &ctx.accounts.config;
     require!(config.switch.phase == Phase::Requested, E::WrongPhase);
-    let pool_key = ctx.accounts.pool.whirlpool.key();
+    let p = &ctx.accounts.pool;
+    let pool_key = p.pool.key();
     require_keys_eq!(pool_key, config.active_pool, E::WrongPool);
-    let authority = ctx.accounts.authority.key();
-    let (ps, sides) = ctx.accounts.pool.load(&authority)?;
+    let ps = ray::read_pool(&p.pool)?;
     let quote = config.active_quote;
-    let index_is_a = config.index_is_a(&quote);
+    let index_is_0 = config.index_is_a(&quote);
+    let mints = if index_is_0 { [config.mint, quote] } else { [quote, config.mint] };
+    require!(
+        p.mint_0.key() == mints[0]
+            && p.mint_1.key() == mints[1]
+            && ps.mint_0 == mints[0]
+            && ps.mint_1 == mints[1]
+            && p.vault_0.key() == ps.vault_0
+            && p.vault_1.key() == ps.vault_1,
+        E::WrongPool
+    );
+    let authority = ctx.accounts.authority.key();
+    util::require_ata(&p.ours_0, &authority, &p.mint_0)?;
+    util::require_ata(&p.ours_1, &authority, &p.mint_1)?;
+    let sides = ray::Sides {
+        mint: mints,
+        program: [*p.mint_0.owner, *p.mint_1.owner],
+        ours: [p.ours_0.key(), p.ours_1.key()],
+        vault: [ps.vault_0, ps.vault_1],
+    };
 
     // Refuse to pull on a price pushed away from its average (the LOOP "block start" check).
-    let spot = math::flip(ps.sqrt_price, !index_is_a);
+    let spot = math::flip(ps.sqrt_price, !index_is_0);
     let ema = config.pool_ema.checked(now)?;
     require!(within_bps(spot, ema, config.max_price_move_bps), E::PoolManipulated);
 
     let infos = ctx.accounts.to_account_infos();
     let bump = [config.authority_bump];
     let seeds: &[&[u8]] = &[AUTHORITY_SEED, &bump];
-    let p = &ctx.accounts.pool;
-    let (ours_a, ours_b) = (p.ours_a.to_account_info(), p.ours_b.to_account_info());
-    let mut fees = (0u64, 0u64);
-
-    for i in 0..2u8 {
-        let (mint, position, lower, upper) = ctx.accounts.positions.slot(&pool_key, i)?;
-        let Some(st) = wp::read_position(position)? else { continue };
+    let (ours_0, ours_1) = (p.ours_0.to_account_info(), p.ours_1.to_account_info());
+    let mut fees = [0u64; 2];
+    for (i, accounts) in [&ctx.accounts.slot_0, &ctx.accounts.slot_1, &ctx.accounts.slot_2].into_iter().enumerate() {
+        let slot = accounts.check(&pool_key, i as u8)?;
+        let Some(st) = ray::read_position(&accounts.personal)? else { continue };
+        let before = [util::token_amount(&ours_0)?, util::token_amount(&ours_1)?];
+        wp::invoke(&ray::decrease_liquidity_ix(authority, pool_key, &sides, &slot, 0), &infos, &[seeds])?;
+        fees[0] += util::token_amount(&ours_0)? - before[0];
+        fees[1] += util::token_amount(&ours_1)? - before[1];
         if st.liquidity > 0 {
-            let ix = wp::modify_liquidity_ix(false, pool_key, authority, mint, &sides, lower, upper, st.liquidity, 0, 0);
-            wp::invoke(&ix, &infos, &[seeds])?;
+            wp::invoke(&ray::decrease_liquidity_ix(authority, pool_key, &sides, &slot, st.liquidity), &infos, &[seeds])?;
         }
-        let (a0, b0) = (util::token_amount(&ours_a)?, util::token_amount(&ours_b)?);
-        wp::invoke(&wp::collect_fees_ix(pool_key, authority, mint, &sides), &infos, &[seeds])?;
-        fees.0 += util::token_amount(&ours_a)? - a0;
-        fees.1 += util::token_amount(&ours_b)? - b0;
-        let receiver = ctx.accounts.cranker.key();
-        wp::invoke(&wp::close_position_ix(authority, receiver, mint), &infos, &[seeds])?;
+        wp::invoke(&ray::close_position_ix(authority, pool_key, &slot), &infos, &[seeds])?;
     }
 
-    let fee_a = ctx.accounts.fee_a.to_account_info();
-    let fee_b = ctx.accounts.fee_b.to_account_info();
+    let program_of = |mint: &AccountInfo<'info>| -> AccountInfo<'info> {
+        if *mint.owner == wp::TOKEN_2022_ID {
+            ctx.accounts.token_2022_program.to_account_info()
+        } else {
+            ctx.accounts.token_program.to_account_info()
+        }
+    };
+    let (m0, m1) = (p.mint_0.to_account_info(), p.mint_1.to_account_info());
     pay_fee_share(
         config,
         [
-            (fees.0, &ours_a, &fee_a, &p.mint_a.to_account_info(), &p.token_program_a.to_account_info()),
-            (fees.1, &ours_b, &fee_b, &p.mint_b.to_account_info(), &p.token_program_b.to_account_info()),
+            (fees[0], &ours_0, &ctx.accounts.fee_0.to_account_info(), &m0, &program_of(&m0)),
+            (fees[1], &ours_1, &ctx.accounts.fee_1.to_account_info(), &m1, &program_of(&m1)),
         ],
         &ctx.accounts.authority,
         seeds,
     )?;
 
-    let start = util::token_amount(if index_is_a { &ours_b } else { &ours_a })?;
+    let start = util::token_amount(if index_is_0 { &ours_1 } else { &ours_0 })?;
     let config = &mut ctx.accounts.config;
     config.switch.old_index_sqrt = spot;
     config.switch.start_amount = start;

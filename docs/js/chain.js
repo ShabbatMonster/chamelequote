@@ -88,21 +88,28 @@ export function decodeQuote(data) {
   };
 }
 
-const ORCA_PROGRAM = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
+const DAMM_PROGRAM = "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG";
 
-/** The coin's pool: Raydium CLMM, or the Orca Whirlpool it lived in before the move. Both store
- *  sqrt(token B / token A) with the mints sorted, so A/B mean token 0/1 on Raydium. */
+/** Our pool for `quote`: the Meteora DAMM v2 customizable pool of the pair. */
+export const dammPoolPda = (mint, quote) => {
+  const [a, b] = [mint.toBytes(), quote.toBytes()];
+  const i = a.findIndex((x, k) => x !== b[k]);
+  const [hi, lo] = i >= 0 && a[i] > b[i] ? [mint, quote] : [quote, mint];
+  return pda([enc("cpool"), hi.toBytes(), lo.toBytes()], pk(DAMM_PROGRAM));
+};
+
+/** The coin's pool: Meteora DAMM v2 (our token is token A), or the Raydium CLMM pool it lived
+ *  in before the move. Both store sqrt(token B / token A). */
 export function decodePool(acc) {
   const r = new Reader(acc.data);
-  if (acc.owner.toBase58() === ORCA_PROGRAM) {
-    r.o = 49;
+  if (acc.owner.toBase58() === DAMM_PROGRAM) {
+    r.o = 168;
+    const mintA = r.key(), mintB = r.key(), vaultA = r.key(), vaultB = r.key();
+    r.o = 360;
     const liquidity = r.u128();
+    r.o = 456;
     const sqrtPrice = r.u128();
-    r.o = 101;
-    const mintA = r.key(), vaultA = r.key();
-    r.o = 181;
-    const mintB = r.key(), vaultB = r.key();
-    return { venue: "Orca Whirlpool", liquidity, sqrtPrice, mintA, vaultA, mintB, vaultB };
+    return { venue: "Meteora DAMM v2", liquidity, sqrtPrice, mintA, vaultA, mintB, vaultB };
   }
   r.o = 73;
   const mintA = r.key(), mintB = r.key(), vaultA = r.key(), vaultB = r.key();
@@ -268,7 +275,7 @@ export function requestSwitchIx(user, state, target) {
   return new web3.TransactionInstruction({
     programId: programId(),
     keys: [
-      meta(user, true, false),
+      meta(user, true, true),
       meta(configPda(), false, true),
       meta(mint, false, false),
       meta(ata(user, mint), false, true),
@@ -276,7 +283,10 @@ export function requestSwitchIx(user, state, target) {
       meta(quotePda(state.config.activeQuote), false, false),
       meta(quotePda(target), false, false),
       meta(quotePda(state.config.wsol), false, false),
+      meta(dammPoolPda(mint, target), false, false),
+      meta(state.config.feeRecipient, false, true),
       meta(pk(TOKEN_PROGRAM), false, false),
+      meta(web3.SystemProgram.programId, false, false),
     ],
     data: Uint8Array.from(IX_REQUEST_SWITCH),
   });

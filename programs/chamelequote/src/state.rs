@@ -24,9 +24,14 @@ pub const MIN_REALISED_VALUE_USDC: u128 = 1_000_000;
 
 pub const MAX_FEE_SHARE_BPS: u16 = 10_000;
 
-/// Position slots in each of our pools: 0 and 1 hold the liquidity and move with every switch;
-/// the sentinel stays behind (see `seed`) so the pool can be repriced when we come back.
+/// Position slots in each of our pools: the main one holds the liquidity and moves with every
+/// switch; the sentinel stays behind so the pool can be repriced when we come back.
+pub const MAIN_SLOT: u8 = 0;
 pub const SENTINEL_SLOT: u8 = 2;
+
+/// Paid by whoever requests a switch into a pool that doesn't exist yet, to the fee recipient
+/// (who funds the keeper): the rent of the pool, its vaults and its sentinel.
+pub const NEW_POOL_FEE_LAMPORTS: u64 = 30_000_000;
 /// The sentinel takes this fraction (1/n) of the backing, or all of a balance smaller than
 /// SENTINEL_MIN raw units (dust, where a thousandth would round to nothing).
 pub const SENTINEL_DIVISOR: u64 = 1000;
@@ -142,8 +147,8 @@ pub struct Config {
     pub escrow_bump: u8,
 
     // Pools
-    /// Raydium CLMM AmmConfig (fee tier) our pools are created under, and its tick spacing.
-    /// (Held the Orca WhirlpoolsConfig before the move to Raydium; same layout.)
+    /// Unused since the move to Meteora DAMM v2 (held the Orca WhirlpoolsConfig, then the
+    /// Raydium AmmConfig); kept for the account layout.
     pub clmm_config: Pubkey,
     pub tick_spacing: u16,
     pub usdc: Pubkey,

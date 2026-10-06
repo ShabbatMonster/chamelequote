@@ -162,13 +162,3 @@ pub fn set_fee_share(ctx: Context<AdminConfig>, recipient: Pubkey, share_bps: u1
     Ok(())
 }
 
-/// Fee tier our future pools are created under (Raydium AmmConfig and its tick spacing). Takes
-/// effect at the next switch; the live pool is not touched.
-pub fn set_pool_venue(ctx: Context<AdminConfig>, clmm_config: Pubkey, tick_spacing: u16) -> Result<()> {
-    let c = &mut ctx.accounts.config;
-    require!(c.switch.phase == Phase::Idle, ChameleonError::WrongPhase);
-    require!(tick_spacing > 0 && tick_spacing <= 1000, ChameleonError::InvalidParam);
-    c.clmm_config = clmm_config;
-    c.tick_spacing = tick_spacing;
-    Ok(())
-}

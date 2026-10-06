@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+pub mod damm;
 pub mod error;
 pub mod instructions;
 pub mod math;
@@ -57,10 +58,6 @@ pub mod chamelequote {
         quotes::set_fee_share(ctx, recipient, share_bps)
     }
 
-    pub fn set_pool_venue(ctx: Context<AdminConfig>, clmm_config: Pubkey, tick_spacing: u16) -> Result<()> {
-        quotes::set_pool_venue(ctx, clmm_config, tick_spacing)
-    }
-
     // Price averages (keeper)
 
     pub fn poke_quotes<'info>(ctx: Context<'info, PokeQuotes>) -> Result<()> {
@@ -85,7 +82,7 @@ pub mod chamelequote {
         switch::pull(ctx)
     }
 
-    /// `pull` from the Orca pool the liquidity lived in before the move to Raydium.
+    /// `pull` from the Raydium pool the liquidity lived in before the move to Meteora DAMM v2.
     pub fn pull_legacy<'info>(ctx: Context<'info, PullLegacy<'info>>) -> Result<()> {
         legacy::pull_legacy(ctx)
     }

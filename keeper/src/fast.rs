@@ -1,9 +1,8 @@
 //! Fast switches. Every step of a switch (pull, hops, then create/seed/reprice and add on the
 //! target pool) is built up front from an estimate of where the switch lands, packed into as few
 //! transactions as the 64-account and 64-entry trace limits allow, and sent back to back, each
-//! one as soon as the previous one is processed. A one-hop switch back into a pool the coin has
-//! used before fits in ONE transaction, so it is atomic; other switches take two, so the coin is
-//! without liquidity for about a second. Transactions are v0 and use address lookup tables kept
+//! one as soon as the previous one is processed. Almost every switch fits in ONE transaction, so
+//! it is atomic; the rest take two, and the coin is without liquidity for about a second. Transactions are v0 and use address lookup tables kept
 //! by this keeper (~/.config/chamelequote/alts.json) to stay under 1232 bytes.
 //!
 //! (Jito bundles were tried first and kept coming back "Invalid" with no reason given; one

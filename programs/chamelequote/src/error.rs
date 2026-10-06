@@ -62,4 +62,8 @@ pub enum ChameleonError {
     WrongQuote,
     #[msg("Math overflow")]
     MathOverflow,
+    #[msg("The pool for that quote was not created by this program")]
+    ForeignPool,
+    #[msg("The coin would land below that pool's floor; pick another quote")]
+    BelowPoolFloor,
 }

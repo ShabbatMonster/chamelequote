@@ -3,7 +3,7 @@
 
 use anchor_lang::prelude::*;
 
-use crate::{error::ChameleonError, math, raydium, state::*, whirlpool};
+use crate::{damm, error::ChameleonError, math, raydium, state::*, whirlpool};
 
 /// sqrt(hub per quote) on the quote's route pool.
 pub fn route_spot(entry: &QuoteEntry, pool: &AccountInfo) -> Result<(u128, u16)> {
@@ -13,14 +13,13 @@ pub fn route_spot(entry: &QuoteEntry, pool: &AccountInfo) -> Result<(u128, u16)>
     Ok((math::flip(p.sqrt_price, p.mint_a != entry.mint), p.fee_rate))
 }
 
-/// sqrt(quote per index) on one of our pools (Raydium, or the Orca pool from before the move).
+/// sqrt(quote per index) on one of our pools (DAMM v2, or the Raydium pool from before the move).
 pub fn index_spot(config: &Config, pool: &AccountInfo, quote: &Pubkey) -> Result<u128> {
-    let sqrt_price = if *pool.owner == whirlpool::WHIRLPOOL_ID {
-        whirlpool::read_pool(pool)?.sqrt_price
-    } else {
-        raydium::read_pool(pool)?.sqrt_price
-    };
-    Ok(math::flip(sqrt_price, !config.index_is_a(quote)))
+    if *pool.owner == damm::DAMM_ID {
+        // Our token is token A: the pool price is already quote per index.
+        return Ok(damm::read_pool(pool)?.sqrt_price);
+    }
+    Ok(math::flip(raydium::read_pool(pool)?.sqrt_price, !config.index_is_a(quote)))
 }
 
 #[derive(Accounts)]

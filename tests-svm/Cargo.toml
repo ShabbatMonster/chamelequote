@@ -21,3 +21,6 @@ solana-keypair = "3"
 solana-message = "4"
 solana-signer = "3"
 solana-transaction = "4"
+# The crank as of the build deployed before the move to DAMM v2 (Raydium pools), for the
+# migration test.
+crank-raydium = { package = "chamelequote-crank", git = "file:///C:/Users/Evan/Desktop/chamelequote", rev = "9bfee32" }

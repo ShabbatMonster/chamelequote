@@ -65,7 +65,7 @@
 
       <section id="overview">
         <h2>1. Overview</h2>
-        <p>Every token of this coin sits in one Raydium pool, and the liquidity in it belongs to a Solana program. No person holds the keys to that liquidity, to the coin's supply or to its name. Two things can be changed by anyone who burns <b>1,000,000 of the coin itself</b> (not the quote token):</p>
+        <p>Every token of this coin sits in one Meteora DAMM v2 pool, and the liquidity in it belongs to a Solana program. No person holds the keys to that liquidity, to the coin's supply or to its name. Two things can be changed by anyone who burns <b>1,000,000 of the coin itself</b> (not the quote token):</p>
         <ul>
           <li><b>The quote token:</b> what the coin trades against. It could be a tokenized stock like TSLAX, a dollar like USDC, SOL, or another coin on the approved list.</li>
           <li><b>The name, ticker and picture.</b></li>
@@ -82,18 +82,18 @@
             <tr><td>Request</td><td>Your 1,000,000 tokens go into escrow. Only one switch can run at a time.</td></tr>
             <tr><td>Pull</td><td>All liquidity comes out of the current pool, along with the trading fees it earned. Trading pauses here.</td></tr>
             <tr><td>Hop</td><td>The backing is swapped toward the new quote one Orca pool at a time, through USDC or SOL. This takes one to three swaps.</td></tr>
-            <tr><td>Reprice</td><td>The new Raydium pool is created at the carried-over price (see <a href="#carry">section 3</a>), or moved there if the coin has used it before.</td></tr>
-            <tr><td>Seed</td><td>The first time the coin uses a pool, 0.1% of the backing (with the matching amount of the coin) stays in it for good as a thin position across all prices. A Raydium pool with nothing in it can't be moved to a new price, so this is what lets the coin come back to the pool later.</td></tr>
-            <tr><td>Add</td><td>Liquidity goes back in. Your escrowed tokens are burned. Trading resumes.</td></tr>
+            <tr><td>Reprice</td><td>Only if the coin has used the new quote's pool before: the pool is moved to the carried-over price (see <a href="#carry">section 3</a>).</td></tr>
+            <tr><td>Add</td><td>Liquidity goes back in, and your escrowed tokens are burned. A new pool is created at the carried-over price, with the floor as its lowest price. 0.1% of the backing (with the matching amount of the coin) stays in every pool for good as a thin position, so the pool can be moved to a new price when the coin comes back; a pool with nothing in it can't be.</td></tr>
           </tbody>
         </table>
-        <p>The keeper sends the steps back to back as soon as your request lands. A switch back into a pool the coin has used before fits in one transaction, so trading never pauses. Otherwise it takes two, and trading pauses for about a second. If a switch is not finished within <b>10 minutes</b>, anyone can cancel it: your 1,000,000 tokens are sent back, and the liquidity goes back in against whichever token the backing is held in at that moment.</p>
+        <p>The keeper sends the steps as soon as your request lands. Almost every switch fits in one transaction, so trading never pauses; the rest take two, and trading pauses for about a second. If a switch is not finished within <b>10 minutes</b>, anyone can cancel it: your 1,000,000 tokens are sent back, and the liquidity goes back in against whichever token the backing is held in at that moment.</p>
         <h3>When you can't switch</h3>
         <ul>
           <li>Another switch is already running.</li>
           <li>The token you picked is already the quote, or has been disabled.</li>
           <li>The price moved sharply in the last half hour. The program waits for its averages to catch up (see <a href="#averages">section 5</a>).</li>
           <li>The averages have not been updated in the last 2 minutes, which means the keeper is down.</li>
+          <li>Someone other than the program created the pool for that quote, or the coin would land below the floor that pool was created with.</li>
         </ul>
         <p>In all of these cases the request is refused before anything is burned.</p>
       </section>
@@ -155,7 +155,8 @@
       <section id="fees">
         <h2>7. Fees</h2>
         <ul>
-          <li><b>Trading fee:</b> 1% per trade, paid into the coin's own pool (Raydium's 1% fee tier). Raydium keeps 16% of it, so the coin's positions earn 0.84%.</li>
+          <li><b>Trading fee:</b> 1% per trade, collected in the quote token. Meteora keeps 20% of it, so the coin's position earns 0.8%.</li>
+          <li><b>New pools:</b> the first switch to a quote the coin has never used costs the requester 0.03 SOL on top of the burn: the rent of the new pool and its permanent thin position.</li>
           <li><b>Where it goes:</b> the keeper collects the fees every 15 minutes and right before each switch. A share set by the admin (<span id="fee-share">up to 100%</span>) goes to the project's fee wallet; the rest stays as extra backing.</li>
           <li><b>Swap fees:</b> when the backing is swapped during a switch, the route pools charge their usual fees (typically 0.04% to 1% per hop).</li>
           <li><b>Burns:</b> 1,000,000 of the coin per rename or switch. There is no other charge, besides normal Solana network fees.</li>
@@ -182,7 +183,7 @@
             <tr><th scope="row">Mint authority</th><td>none (revoked at launch)</td></tr>
             <tr><th scope="row">Freeze authority</th><td>none</td></tr>
             <tr><th scope="row">Metadata update authority</th><td>the program's <code>authority</code> account</td></tr>
-            <tr><th scope="row">Coin's pools</th><td>Raydium CLMM, 1% fee tier (tick spacing 120)</td></tr>
+            <tr><th scope="row">Coin's pools</th><td>Meteora DAMM v2 customizable pools, 1% fee collected in the quote token, priced from the floor to the top</td></tr>
             <tr><th scope="row">Route pools</th><td>Orca Whirlpools (one per quote, against USDC or SOL)</td></tr>
             <tr><th scope="row">Source</th><td><a href="https://github.com/ShabbatMonster/chamelequote" target="_blank" rel="noopener">github.com/ShabbatMonster/chamelequote</a></td></tr>
           </tbody>
@@ -199,7 +200,6 @@
             <tr><td><code>poke_quotes</code>, <code>poke_pool</code></td><td>anyone</td><td>Update the price averages.</td></tr>
             <tr><td><code>list_quote</code>, <code>set_quote_enabled</code>, <code>set_quote_route</code></td><td>admin</td><td>Manage the approved list.</td></tr>
             <tr><td><code>set_risk_bounds</code>, <code>set_fee_share</code></td><td>admin</td><td>Tune the safety checks (0.5% to 5%) and the fee share (up to 100%).</td></tr>
-            <tr><td><code>set_pool_venue</code></td><td>admin</td><td>Picks the Raydium fee tier new pools are created in.</td></tr>
             <tr><td><code>set_admin</code></td><td>admin</td><td>Hands over or renounces the admin role. Renouncing freezes the list for good.</td></tr>
           </tbody>
         </table>
@@ -209,9 +209,10 @@
       <section id="risks">
         <h2>10. Risks</h2>
         <ul>
-          <li><b>Not audited.</b> The program has been tested against the real Raydium, Orca and Metaplex programs, but no outside firm has reviewed it.</li>
+          <li><b>Not audited.</b> The program has been tested against the real Meteora, Orca, Raydium and Metaplex programs, but no outside firm has reviewed it.</li>
           <li><b>Stock tokens:</b> tokenized stocks are issued by a company that can pause, freeze or move them. That includes the coin's backing while it sits in one.</li>
           <li><b>Thin quotes:</b> a quote with a shallow pool can make a switch fail its slippage check, or cost the backing a few percent.</li>
+          <li><b>Coming back to a quote:</b> each quote's pool keeps the floor it was created with. When the coin returns to it later, part of the backing or of the unsold coins may not fit the old range and waits outside the pool until the next switch. If the coin would land below that old floor, the switch is refused before anything is burned.</li>
           <li><b>The admin list:</b> whoever holds the admin role decides which tokens can be quotes, until the role is renounced.</li>
           <li><b>Renames are open to everyone:</b> anyone with 1,000,000 tokens can rename the coin to anything that fits the rules, including names you won't like.</li>
         </ul>

@@ -1,8 +1,8 @@
 //! chamelequote keeper.
 //!
 //! Switches take the fast path (see fast.rs): every step packed into as few transactions as fit
-//! (one, atomic, for a one-hop switch back into a pool used before; two back to back otherwise).
-//! If that fails the keeper falls back to sending the steps one by one.
+//! (usually one, so the switch is atomic). If that fails the keeper falls back to sending the
+//! steps one by one.
 //!
 //! Every ~50 s it pokes the price averages of every listed quote and of the coin's own pool (a
 //! switch refuses to trade on an average older than two minutes). Every few seconds it checks
@@ -22,8 +22,6 @@
 //!                 [--out docs/quotes.json]   (the listed mints, for the website)
 //!   keeper launch --quote <mint> --price-num <n> --price-den <n>   (raw quote per raw token)
 //!   keeper request --quote <mint>   burn the keypair's coins to request a switch (testing)
-//!   keeper venue  [--clmm-config <pubkey>] [--tick-spacing <n>]   Raydium fee tier for new pools
-//!                 (default: the 1% tier); the live pool moves there at the next switch
 //!   keeper allow  --allowlist data/allowlist.json --routes data/orca-routes.json [--min-tvl 10000]
 //!                 [--out docs/quotes.json]   enable exactly the allowlist (listing what's missing)
 
@@ -43,7 +41,7 @@ use anchor_lang::{
 use chamelequote::{state::QuoteEntry, ID as PROGRAM_ID};
 use chamelequote::{instructions::InitializeParams, math};
 use chamelequote_crank::{
-    config_pda, initialize_ix, launch_ix, list_quote_ix, quote_pda, request_switch_ix, set_pool_venue_ix, set_quote_enabled_ix,
+    config_pda, initialize_ix, launch_ix, list_quote_ix, quote_pda, request_switch_ix, set_quote_enabled_ix,
     Action, Crank, Ledger, QUOTE_ENTRY_DISCRIMINATOR,
 };
 use solana_account_decoder_client_types::UiAccountEncoding;
@@ -66,8 +64,8 @@ const TICK: Duration = Duration::from_secs(1);
 const FAST_ATTEMPTS: u32 = 1;
 const CLAIM_EVERY: Duration = Duration::from_secs(900);
 
-// Mainnet defaults for `init` and `venue`: Raydium CLMM's 1% fee tier.
-const CLMM_CONFIG: &str = "A1BBtTYJd4i3xU8D6Tc2FzU6ZN4oXZWXKZnCxwbHXr8x";
+// Mainnet defaults for `init`. (The pool config fields are unused since the move to DAMM v2.)
+const CLMM_CONFIG: &str = "11111111111111111111111111111111";
 const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const WSOL: &str = "So11111111111111111111111111111111111111112";
 const TICK_SPACING: u16 = 120;
@@ -185,7 +183,7 @@ fn send(rpc: &Rpc, payer: &Keypair, action: &Action, priority_fee: u64) -> Resul
     signers.extend(action.signers.iter());
     let tx = Transaction::new_signed_with_payer(&ixs, Some(&payer.pubkey()), &signers, blockhash);
     if bincode::serialize(&tx).map(|b| b.len()).unwrap_or(usize::MAX) > fast::MAX_TX_BYTES {
-        // Too big for a legacy transaction (a Raydium step names ~30 accounts): v0 with lookup tables.
+        // Too big for a legacy transaction (a switch step names ~30 accounts): v0 with lookup tables.
         let keys: Vec<Pubkey> = action.ixs.iter().flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey)).collect();
         let alts = fast::ensure_alts(rpc, payer, &keys, priority_fee)?;
         let extra: Vec<&Keypair> = action.signers.iter().collect();
@@ -296,7 +294,12 @@ fn crank_round(rpc: &Rpc, payer: &Keypair, fee: u64, fast: bool, attempts: &mut 
                         log("switch done on the fast path");
                         return 1;
                     }
-                    Ok(false) => {}
+                    // Nothing to do yet (the RPC node we asked may not have seen the request
+                    // yet): that doesn't count as an attempt; look again next tick.
+                    Ok(false) => {
+                        *tries -= 1;
+                        return 0;
+                    }
                     Err(e) => log(&format!("fast path failed, going step by step: {}", first_line(&e))),
                 }
             }
@@ -354,9 +357,8 @@ fn status(rpc: &Rpc) {
     let now = rpc.now();
     println!("mint          {}", c.mint);
     println!("active quote  {}", c.active_quote);
-    let venue = if crank.is_legacy(&c.active_pool) { "Orca (moves to Raydium at the next switch)" } else { "Raydium" };
+    let venue = if crank.is_legacy(&c.active_pool) { "Raydium (moves to Meteora at the next switch)" } else { "Meteora DAMM v2" };
     println!("active pool   {} ({venue})", c.active_pool);
-    println!("new pools     Raydium config {} (tick spacing {})", c.clmm_config, c.tick_spacing);
     println!("switch phase  {:?} (target {}, holding {}, deadline in {}s)", c.switch.phase, c.switch.target, c.switch.holding, c.switch.deadline - now);
     println!("pool average  last poke {}s ago, warm: {}", now - c.pool_ema.last_ts, c.pool_ema.is_valid(now));
     for q in rpc.quote_entries() {
@@ -397,7 +399,7 @@ fn main() {
     let rpc = Rpc(RpcClient::new_with_commitment(o.rpc.clone(), CommitmentConfig::confirmed()));
     match cmd.as_str() {
         "status" => return status(&rpc),
-        "run" | "once" | "init" | "list" | "launch" | "allow" | "request" | "venue" => {}
+        "run" | "once" | "init" | "list" | "launch" | "allow" | "request" => {}
         _ => {
             println!("usage: keeper run|once|status|init|list|launch --rpc <url> --keypair <path> ... (see source header)");
             return;
@@ -422,12 +424,7 @@ fn main() {
             let ix = request_switch_ix(&payer.pubkey(), &c, &o.pubkey("quote"));
             return send_ixs(&rpc, &payer, "request switch", vec![ix], vec![], o.priority_fee);
         }
-        "venue" => {
-            let config: Pubkey = o.get_or("clmm-config", CLMM_CONFIG).parse().expect("--clmm-config must be a public key");
-            let ts: u16 = o.get_or("tick-spacing", &TICK_SPACING.to_string()).parse().expect("--tick-spacing takes a number");
-            let ix = set_pool_venue_ix(&payer.pubkey(), &config, ts);
-            return send_ixs(&rpc, &payer, "set pool venue", vec![ix], vec![], o.priority_fee);
-        }
+
         _ => {}
     }
     if rpc.account(&config_pda()).is_none() {

@@ -1,17 +1,19 @@
 //! Quote switching. A user burns `burn_amount` (held in escrow until the switch lands) to request
 //! a new quote; then anyone cranks it through:
 //!
-//!   request -> pull -> hop (1-3x) -> reprice (0+x) -> [seed] -> add
+//!   request -> pull -> hop (1-3x) -> [seed] -> [reprice] -> add
 //!
-//! `pull` takes all liquidity out of the active pool, `hop` swaps the backing one route pool at a
-//! time (quote -> hub -> [other hub] -> target), `reprice` creates the target pool at the
-//! translated price or moves it there, and `add` lays the liquidity back as two positions: every
-//! index token above the price, every quote token between the floor and the price. The index
-//! keeps its value: its price and floor are multiplied by the realised exchange rate.
+//! `pull` takes the liquidity out of the active pool, `hop` swaps the backing one route pool at a
+//! time (quote -> hub -> [other hub] -> target), and `add` lays it back into the target pool at
+//! the translated price: every index token between the price and the top, every quote token
+//! between the floor and the price. The index keeps its value: its price and floor are multiplied
+//! by the realised exchange rate.
 //!
-//! Our pools are Raydium CLMM pools; route pools are Orca Whirlpools. A Raydium swap cannot move
-//! the price of a pool with no liquidity, so every pool we use keeps a small full-range
-//! "sentinel" position (`seed`) that a later `reprice` can swap through.
+//! Our pools are Meteora DAMM v2 customizable pools (one per quote, our token as token A); route
+//! pools are Orca Whirlpools. `add` creates a new pool at the target price with the floor as its
+//! lower bound. A pool the coin has used before keeps its range and price: `reprice` swaps it to
+//! the target through the "sentinel", a small position that `add` (or `seed`) leaves in every
+//! pool for good, since a pool with no liquidity cannot be moved.
 //!
 //! While a switch is in flight the pool is empty, so the keeper sends the steps back to back. A
 //! switch not finished by its deadline can be aborted by anyone: the burn is refunded and the
@@ -22,10 +24,10 @@ use anchor_lang::solana_program::{program::invoke, system_instruction};
 use anchor_spl::token::{self, Burn, Token, Transfer};
 
 use crate::{
+    damm,
     error::ChameleonError as E,
     instructions::oracle,
     math,
-    raydium::{self as ray, Sides},
     state::*,
     util,
     whirlpool::{self as wp, PoolState},
@@ -35,221 +37,144 @@ pub fn position_mint_address(pool: &Pubkey, index: u8) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[POSITION_MINT_SEED, pool.as_ref(), &[index]], &crate::ID)
 }
 
-/// Our token and `quote` in pool order (sorted).
-pub fn pool_mints(config: &Config, quote: &Pubkey) -> [Pubkey; 2] {
-    if config.index_is_a(quote) {
-        [config.mint, *quote]
-    } else {
-        [*quote, config.mint]
-    }
-}
-
+/// Our pool for `quote`.
 pub fn expected_pool(config: &Config, quote: &Pubkey) -> Pubkey {
-    let [m0, m1] = pool_mints(config, quote);
-    ray::pool_address(&config.clmm_config, &m0, &m1)
+    damm::pool_address(&config.mint, quote)
 }
 
-/// Tick ranges for the two positions `add` opens: the index position, and the backing (None
-/// when the floor leaves it no room). Both meet at a tick boundary next to the price, on the
-/// side that keeps the index position out of range: the index position holds only the index
-/// token and the backing, the only one that can straddle the price, holds the quote plus a
-/// sliver of index. No gap, so the pool always has liquidity at its price.
-pub fn plan_positions(index_is_0: bool, pool: &ray::PoolState, floor_index_sqrt: u128) -> ((i32, i32), Option<(i32, i32)>) {
-    let ts = pool.tick_spacing as i32;
-    let max_t = math::max_usable_tick(ts);
-    let lo_b = math::align_down(pool.tick_current, ts);
-    let hi_b = if math::sqrt_price_at_tick(lo_b) == pool.sqrt_price { lo_b } else { lo_b + ts };
-    let floor_tick =
-        math::align_down(math::tick_at_sqrt_price(math::flip(floor_index_sqrt, !index_is_0)), ts).clamp(-max_t, max_t);
-    if index_is_0 {
-        ((hi_b, max_t), (floor_tick < hi_b).then_some((floor_tick, hi_b)))
-    } else {
-        ((-max_t, lo_b), (lo_b < floor_tick).then_some((lo_b, floor_tick)))
-    }
+/// A target price kept strictly inside a pool's range (DAMM won't trade outside it).
+pub fn clamp_to_range(sqrt_price: u128, pool: &damm::PoolState) -> u128 {
+    sqrt_price.clamp(pool.sqrt_min + pool.sqrt_min / 10_000 + 1, pool.sqrt_max - pool.sqrt_max / 10_000)
 }
 
-/// Liquidity Raydium will give `amount` of token 0 (`token_0`) or token 1 over [lo, hi] at the
-/// pool price, as `open_position` sizes it from a single amount. Used to skip empty positions.
-pub fn liquidity_for(token_0: bool, amount: u64, sqrt_price: u128, lo: i32, hi: i32) -> u128 {
-    let (sl, sh) = (math::sqrt_price_at_tick(lo), math::sqrt_price_at_tick(hi));
-    let p = sqrt_price.clamp(sl, sh);
-    if token_0 {
-        math::liquidity_for_a(amount, p, sh)
-    } else {
-        math::liquidity_for_b(amount, sl, p)
-    }
+/// Liquidity for `index` and `quote` in a pool at `sqrt_price` over [sqrt_min, sqrt_max]: the
+/// most both can fund, less a hair so the deposit always fits.
+pub fn liquidity_for(index: u64, quote: u64, sqrt_price: u128, sqrt_min: u128, sqrt_max: u128) -> u128 {
+    let l = damm::liquidity_from_a(index, sqrt_price, sqrt_max).min(damm::liquidity_from_b(quote, sqrt_min, sqrt_price));
+    l.saturating_sub(l / 1_000_000 + 1)
 }
 
-/// One of our Raydium pools (which may not exist yet) plus the program's token account for each
-/// side. Validated against the pool expected for a quote by `load`.
+/// One of our DAMM v2 pools (which may not exist yet) plus the program's token account for each
+/// side. Token A is always our token.
 #[derive(Accounts)]
 pub struct OurPool<'info> {
-    /// CHECK: the caller checks the address; `load` checks owner and contents.
+    /// CHECK: checked against the quote in `load`, which also checks owner and contents.
     #[account(mut)]
     pub pool: UncheckedAccount<'info>,
-    /// CHECK: must be token 0 of the pool.
-    pub mint_0: UncheckedAccount<'info>,
-    /// CHECK: must be token 1 of the pool.
-    pub mint_1: UncheckedAccount<'info>,
-    /// CHECK: must be the authority's ATA for mint 0.
+    /// CHECK: our mint (token A); checked against the config.
+    pub index_mint: UncheckedAccount<'info>,
+    /// CHECK: the quote's mint (token B).
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: must be the authority's ATA for our token.
     #[account(mut)]
-    pub ours_0: UncheckedAccount<'info>,
-    /// CHECK: must be the authority's ATA for mint 1.
+    pub ours_index: UncheckedAccount<'info>,
+    /// CHECK: must be the authority's ATA for the quote.
     #[account(mut)]
-    pub ours_1: UncheckedAccount<'info>,
-    /// CHECK: must be the pool's vault 0.
+    pub ours_quote: UncheckedAccount<'info>,
+    /// CHECK: must be the pool's vault A.
     #[account(mut)]
-    pub vault_0: UncheckedAccount<'info>,
-    /// CHECK: must be the pool's vault 1.
+    pub vault_a: UncheckedAccount<'info>,
+    /// CHECK: must be the pool's vault B.
     #[account(mut)]
-    pub vault_1: UncheckedAccount<'info>,
+    pub vault_b: UncheckedAccount<'info>,
 }
 
 impl<'info> OurPool<'info> {
-    /// The pool's state (None if not created yet) and its sides, after checking the mints are our
-    /// token and `quote`, the vaults are the pool's and the token accounts are the authority's.
-    fn load(&self, config: &Config, quote: &Pubkey, authority: &Pubkey) -> Result<(Option<ray::PoolState>, Sides)> {
-        let mints = pool_mints(config, quote);
-        require!(self.mint_0.key() == mints[0] && self.mint_1.key() == mints[1], E::WrongPool);
+    /// The pool's state (None if not created yet) and its sides, after checking it is our pool
+    /// for `quote`, the vaults are its own and the token accounts are the authority's.
+    fn load(&self, config: &Config, quote: &Pubkey, authority: &Pubkey) -> Result<(Option<damm::PoolState>, damm::Sides)> {
         let key = self.pool.key();
-        let state = if self.pool.data_is_empty() { None } else { Some(ray::read_pool(&self.pool)?) };
+        require!(
+            self.index_mint.key() == config.mint && self.quote_mint.key() == *quote && key == expected_pool(config, quote),
+            E::WrongPool
+        );
+        let state = if self.pool.data_is_empty() { None } else { Some(damm::read_pool(&self.pool)?) };
         let vaults = match &state {
             Some(p) => {
-                require!(p.mint_0 == mints[0] && p.mint_1 == mints[1], E::WrongPool);
-                [p.vault_0, p.vault_1]
+                // Token A must be ours; a pool someone else set up the other way round is not.
+                require!(p.mint_a == config.mint && p.mint_b == *quote, E::WrongPool);
+                [p.vault_a, p.vault_b]
             }
-            None => [ray::vault_address(&key, &mints[0]), ray::vault_address(&key, &mints[1])],
+            None => [damm::vault_address(&key, &config.mint), damm::vault_address(&key, quote)],
         };
-        require!(self.vault_0.key() == vaults[0] && self.vault_1.key() == vaults[1], E::WrongPool);
-        util::require_ata(&self.ours_0, authority, &self.mint_0)?;
-        util::require_ata(&self.ours_1, authority, &self.mint_1)?;
-        let sides = Sides {
-            mint: mints,
-            program: [*self.mint_0.owner, *self.mint_1.owner],
-            ours: [self.ours_0.key(), self.ours_1.key()],
-            vault: vaults,
+        require!(self.vault_a.key() == vaults[0] && self.vault_b.key() == vaults[1], E::WrongPool);
+        util::require_ata(&self.ours_index, authority, &self.index_mint)?;
+        util::require_ata(&self.ours_quote, authority, &self.quote_mint)?;
+        let sides = damm::Sides {
+            pool: key,
+            mint_a: config.mint,
+            mint_b: *quote,
+            program_a: *self.index_mint.owner,
+            program_b: *self.quote_mint.owner,
+            ours_a: self.ours_index.key(),
+            ours_b: self.ours_quote.key(),
+            vault_a: vaults[0],
+            vault_b: vaults[1],
         };
         Ok((state, sides))
     }
 
-    fn ours(&self, i: usize) -> &AccountInfo<'info> {
-        if i == 0 {
-            self.ours_0.as_ref()
-        } else {
-            self.ours_1.as_ref()
-        }
+    fn balances(&self) -> Result<(u64, u64)> {
+        Ok((util::token_amount(&self.ours_index)?, util::token_amount(&self.ours_quote)?))
     }
 }
 
-/// One position slot: NFT mint (our PDA), the authority's NFT account, Raydium's position
-/// account, and the tick arrays holding both ends.
+/// One position slot: NFT mint (our PDA) and DAMM's NFT account and position for it.
 #[derive(Accounts)]
-pub struct SlotAccounts<'info> {
+pub struct Slot<'info> {
     /// CHECK: PDA, verified against the pool.
     #[account(mut)]
     pub nft_mint: UncheckedAccount<'info>,
-    /// CHECK: authority's token-2022 ATA for the NFT; Raydium checks it.
+    /// CHECK: DAMM's NFT account PDA of the mint.
     #[account(mut)]
     pub nft_account: UncheckedAccount<'info>,
-    /// CHECK: Raydium position PDA of the NFT mint.
+    /// CHECK: DAMM's position PDA of the mint.
     #[account(mut)]
-    pub personal: UncheckedAccount<'info>,
-    /// CHECK: Raydium validates.
-    #[account(mut)]
-    pub lower: UncheckedAccount<'info>,
-    /// CHECK: Raydium validates.
-    #[account(mut)]
-    pub upper: UncheckedAccount<'info>,
+    pub position: UncheckedAccount<'info>,
 }
 
-impl<'info> SlotAccounts<'info> {
-    /// Checks the NFT mint is our PDA for (`pool`, `i`) and the position account is Raydium's
-    /// for that mint.
-    fn check(&self, pool: &Pubkey, i: u8) -> Result<ray::Slot> {
-        require_keys_eq!(self.nft_mint.key(), position_mint_address(pool, i).0, E::BadPosition);
-        require_keys_eq!(self.personal.key(), ray::personal_position_address(&self.nft_mint.key()), E::BadPosition);
-        Ok(ray::Slot { nft_mint: self.nft_mint.key(), lower_array: self.lower.key(), upper_array: self.upper.key() })
-    }
-
-    /// Rent the authority needs to open a position here (position, NFT, new tick arrays).
-    fn rent_needed(&self) -> Result<u64> {
-        let rent = Rent::get()?;
-        let mut need = rent.minimum_balance(ray::PERSONAL_POSITION_LEN)
-            + rent.minimum_balance(ray::NFT_MINT_LEN)
-            + rent.minimum_balance(ray::NFT_ACCOUNT_LEN);
-        if self.lower.data_is_empty() {
-            need += rent.minimum_balance(ray::TICK_ARRAY_LEN);
-        }
-        if self.upper.data_is_empty() && self.upper.key() != self.lower.key() {
-            need += rent.minimum_balance(ray::TICK_ARRAY_LEN);
-        }
-        Ok(need)
-    }
-
-    /// Opens a position in this slot owned (and paid for) by the authority.
-    #[allow(clippy::too_many_arguments)]
-    fn open(
-        &self,
-        pool_key: &Pubkey,
-        i: u8,
-        sides: &Sides,
-        ts: i32,
-        range: (i32, i32),
-        amount_max: [u64; 2],
-        base_0: bool,
-        authority: Pubkey,
-        infos: &[AccountInfo<'info>],
-        auth_seeds: &[&[u8]],
-    ) -> Result<()> {
-        let slot = self.check(pool_key, i)?;
-        require!(self.personal.data_is_empty(), E::BadPosition);
-        let mint_bump = [position_mint_address(pool_key, i).1];
-        let idx = [i];
-        let mint_seeds: &[&[u8]] = &[POSITION_MINT_SEED, pool_key.as_ref(), &idx, &mint_bump];
-        let ix = ray::open_position_ix(
-            authority, *pool_key, sides, &slot, range.0, range.1, ts, amount_max[0], amount_max[1], base_0,
+impl<'info> Slot<'info> {
+    /// Checks the NFT mint is our PDA for (`pool`, `i`) and the other two are DAMM's for it.
+    /// Returns the position's liquidity, None if it is not open.
+    fn check(&self, pool: &Pubkey, i: u8) -> Result<Option<u128>> {
+        let mint = self.nft_mint.key();
+        require!(
+            mint == position_mint_address(pool, i).0
+                && self.position.key() == damm::position_address(&mint)
+                && self.nft_account.key() == damm::nft_account_address(&mint),
+            E::BadPosition
         );
-        wp::invoke(&ix, infos, &[auth_seeds, mint_seeds])
+        Ok(damm::read_position(&self.position)?.map(|(_, l)| l))
+    }
+
+    fn mint_seeds(pool: &Pubkey, i: u8) -> ([u8; 1], [u8; 1]) {
+        ([i], [position_mint_address(pool, i).1])
+    }
+
+    /// Rent of a new position here (position, NFT mint and NFT account).
+    fn rent() -> Result<u64> {
+        let rent = Rent::get()?;
+        Ok(rent.minimum_balance(damm::POSITION_LEN)
+            + rent.minimum_balance(damm::NFT_MINT_LEN)
+            + rent.minimum_balance(damm::TOKEN_ACCOUNT_LEN))
     }
 }
 
-/// The liquidity slots (0: index, 1: backing).
-#[derive(Accounts)]
-pub struct Positions<'info> {
-    pub slot_0: SlotAccounts<'info>,
-    pub slot_1: SlotAccounts<'info>,
-}
-
-impl<'info> Positions<'info> {
-    fn get(&self, i: u8) -> &SlotAccounts<'info> {
-        if i == 0 {
-            &self.slot_0
-        } else {
-            &self.slot_1
-        }
-    }
-}
-
-/// Programs and sysvars Raydium wants to see.
+/// Programs DAMM wants to see, plus its two fixed PDAs.
 #[derive(Accounts)]
 pub struct Programs<'info> {
     pub token_program: Program<'info, Token>,
     /// CHECK: address checked.
     #[account(address = wp::TOKEN_2022_ID)]
     pub token_2022_program: UncheckedAccount<'info>,
-    /// CHECK: address checked.
-    #[account(address = wp::MEMO_ID)]
-    pub memo_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
     /// CHECK: address checked.
-    #[account(address = wp::ATA_PROGRAM_ID)]
-    pub associated_token_program: UncheckedAccount<'info>,
-    /// CHECK: address checked.
-    #[account(address = wp::RENT_SYSVAR_ID)]
-    pub rent: UncheckedAccount<'info>,
-    /// CHECK: address checked.
-    #[account(address = ray::CLMM_ID)]
-    pub clmm_program: UncheckedAccount<'info>,
+    #[account(address = damm::DAMM_ID)]
+    pub damm_program: UncheckedAccount<'info>,
+    /// CHECK: DAMM's pool authority; DAMM checks it.
+    pub pool_authority: UncheckedAccount<'info>,
+    /// CHECK: DAMM's event authority; DAMM checks it.
+    pub event_authority: UncheckedAccount<'info>,
 }
 
 impl<'info> Programs<'info> {
@@ -263,8 +188,8 @@ impl<'info> Programs<'info> {
     }
 }
 
-/// Raydium makes the position owner pay the rent of what it creates, and our positions are owned
-/// by the authority PDA, so the funder tops the authority up first. Closed positions refund the
+/// DAMM makes the payer of a pool or position the one who funds it, and ours are funded by the
+/// authority PDA, so the funder tops the authority up first. Closed positions refund the
 /// authority, so the balance is mostly reused.
 fn fund_authority<'info>(funder: &AccountInfo<'info>, authority: &AccountInfo<'info>, system: &AccountInfo<'info>, need: u64) -> Result<()> {
     // A system account must stay rent exempt (or empty) after paying.
@@ -279,7 +204,45 @@ fn fund_authority<'info>(funder: &AccountInfo<'info>, authority: &AccountInfo<'i
     Ok(())
 }
 
-/// Both sides of a Whirlpool plus the program's token account for each.
+/// Collects a position's fees into the authority's accounts; returns (index, quote) collected.
+fn claim<'info>(
+    pool: &OurPool<'info>,
+    sides: &damm::Sides,
+    nft_mint: Pubkey,
+    authority: Pubkey,
+    infos: &[AccountInfo<'info>],
+    seeds: &[&[u8]],
+) -> Result<(u64, u64)> {
+    let before = pool.balances()?;
+    wp::invoke(&damm::claim_fee_ix(authority, nft_mint, sides), infos, &[seeds])?;
+    let after = pool.balances()?;
+    Ok((after.0 - before.0, after.1 - before.1))
+}
+
+/// Pays the fee recipient its share of fees just collected from `pool`.
+fn pay_pool_fees<'info>(
+    config: &Config,
+    pool: &OurPool<'info>,
+    fee_index: &AccountInfo<'info>,
+    fee_quote: &AccountInfo<'info>,
+    programs: &Programs<'info>,
+    authority: &AccountInfo<'info>,
+    fees: (u64, u64),
+    seeds: &[&[u8]],
+) -> Result<()> {
+    let (mi, mq) = (pool.index_mint.to_account_info(), pool.quote_mint.to_account_info());
+    pay_fee_share(
+        config,
+        [
+            (fees.0, pool.ours_index.as_ref(), fee_index, &mi, &programs.for_mint(&mi)),
+            (fees.1, pool.ours_quote.as_ref(), fee_quote, &mq, &programs.for_mint(&mq)),
+        ],
+        authority,
+        seeds,
+    )
+}
+
+/// Both sides of an Orca route pool plus the program's token account for each.
 #[derive(Accounts)]
 pub struct PoolSides<'info> {
     /// CHECK: read and validated in `load`; Orca validates the rest.
@@ -398,9 +361,10 @@ pub fn launch(ctx: Context<Launch>, index_sqrt: u128) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct RequestSwitch<'info> {
+    #[account(mut)]
     pub user: Signer<'info>,
 
-    #[account(mut, has_one = mint)]
+    #[account(mut, has_one = mint, has_one = fee_recipient)]
     pub config: Box<Account<'info, Config>>,
 
     /// CHECK: our mint (has_one on config).
@@ -423,7 +387,16 @@ pub struct RequestSwitch<'info> {
     #[account(constraint = wsol_quote.mint == config.wsol @ E::WrongQuote)]
     pub wsol_quote: Box<Account<'info, QuoteEntry>>,
 
+    /// CHECK: our pool for the new quote (address checked); may not exist yet.
+    #[account(address = expected_pool(&config, &new_quote.mint) @ E::WrongPool)]
+    pub target_pool: UncheckedAccount<'info>,
+
+    /// CHECK: receives the new-pool fee (has_one on config).
+    #[account(mut)]
+    pub fee_recipient: UncheckedAccount<'info>,
+
     pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 pub fn request_switch(ctx: Context<RequestSwitch>) -> Result<()> {
@@ -440,6 +413,29 @@ pub fn request_switch(ctx: Context<RequestSwitch>) -> Result<()> {
     // new per old = (USDC per old) / (USDC per new)
     let ema_rate_sqrt = math::div_sqrt(usd_old, usd_new);
     let realised_min = math::quote_out(MIN_REALISED_VALUE_USDC as u64, math::invert_sqrt(usd_old)).min(u64::MAX as u128);
+
+    let target_pool = &ctx.accounts.target_pool;
+    if target_pool.data_is_empty() {
+        // A new pool: the requester pays for the accounts it leaves behind.
+        invoke(
+            &system_instruction::transfer(&ctx.accounts.user.key(), &config.fee_recipient, NEW_POOL_FEE_LAMPORTS),
+            &[
+                ctx.accounts.user.to_account_info(),
+                ctx.accounts.fee_recipient.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+        )?;
+    } else {
+        // Only a pool we created (our token as token A, our authority as creator) will do, and
+        // its fixed floor must leave room for the price the coin will land at.
+        let p = damm::read_pool(target_pool)?;
+        let authority = Pubkey::create_program_address(&[AUTHORITY_SEED, &[config.authority_bump]], &crate::ID)
+            .map_err(|_| error!(E::InvalidParam))?;
+        require!(p.creator == authority && p.mint_a == config.mint, E::ForeignPool);
+        let landing = math::mul_sqrt(config.pool_ema.checked(now)?, ema_rate_sqrt);
+        // A hair below is fine: `add` lands it just inside the range (the coin is at its floor).
+        require!(landing >= p.sqrt_min - p.sqrt_min / 10_000, E::BelowPoolFloor);
+    }
 
     let burn = config.burn_amount;
     token::transfer(
@@ -480,17 +476,25 @@ pub struct Pull<'info> {
     #[account(mut)]
     pub config: Box<Account<'info, Config>>,
 
-    /// CHECK: PDA signer; receives the closed positions' rent (reused at the next `add`).
+    /// CHECK: PDA signer; receives the closed position's rent (reused at the next `add`).
     #[account(mut, seeds = [AUTHORITY_SEED], bump = config.authority_bump)]
     pub authority: UncheckedAccount<'info>,
 
     pub pool: OurPool<'info>,
-    pub positions: Positions<'info>,
+    pub position: Slot<'info>,
+
+    /// CHECK: fee recipient's ATA for our token (checked when a share is paid).
+    #[account(mut)]
+    pub fee_index: UncheckedAccount<'info>,
+    /// CHECK: fee recipient's ATA for the quote (checked when a share is paid).
+    #[account(mut)]
+    pub fee_quote: UncheckedAccount<'info>,
+
     pub programs: Programs<'info>,
 }
 
-/// Takes the liquidity out of the active pool and closes the positions (the sentinel stays).
-/// Fees earned since the last `claim_fees` come out with it and stay as backing.
+/// Takes the liquidity out of the active pool and closes the position (the sentinel stays).
+/// Fees earned since the last claim are paid out as usual.
 pub fn pull<'info>(ctx: Context<'info, Pull<'info>>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let config = &ctx.accounts.config;
@@ -501,25 +505,34 @@ pub fn pull<'info>(ctx: Context<'info, Pull<'info>>) -> Result<()> {
     let quote = config.active_quote;
     let (state, sides) = ctx.accounts.pool.load(config, &quote, &authority)?;
     let ps = state.ok_or(E::WrongPool)?;
-    let index_is_0 = config.index_is_a(&quote);
 
     // Refuse to pull on a price pushed away from its average (the LOOP "block start" check).
-    let spot = math::flip(ps.sqrt_price, !index_is_0);
+    let spot = ps.sqrt_price;
     let ema = config.pool_ema.checked(now)?;
     require!(within_bps(spot, ema, config.max_price_move_bps), E::PoolManipulated);
 
     let infos = ctx.accounts.to_account_infos();
     let bump = [config.authority_bump];
     let seeds: &[&[u8]] = &[AUTHORITY_SEED, &bump];
-    for i in 0..2u8 {
-        let accounts = ctx.accounts.positions.get(i);
-        let slot = accounts.check(&pool_key, i)?;
-        let Some(st) = ray::read_position(&accounts.personal)? else { continue };
-        wp::invoke(&ray::decrease_liquidity_ix(authority, pool_key, &sides, &slot, st.liquidity), &infos, &[seeds])?;
-        wp::invoke(&ray::close_position_ix(authority, pool_key, &slot), &infos, &[seeds])?;
+    let nft = ctx.accounts.position.nft_mint.key();
+    let mut fees = (0, 0);
+    if ctx.accounts.position.check(&pool_key, MAIN_SLOT)?.is_some() {
+        fees = claim(&ctx.accounts.pool, &sides, nft, authority, &infos, seeds)?;
+        wp::invoke(&damm::remove_all_liquidity_ix(authority, nft, &sides), &infos, &[seeds])?;
+        wp::invoke(&damm::close_position_ix(authority, nft, pool_key), &infos, &[seeds])?;
     }
+    pay_pool_fees(
+        config,
+        &ctx.accounts.pool,
+        &ctx.accounts.fee_index,
+        &ctx.accounts.fee_quote,
+        &ctx.accounts.programs,
+        &ctx.accounts.authority,
+        fees,
+        seeds,
+    )?;
 
-    let start = util::token_amount(ctx.accounts.pool.ours(index_is_0 as usize))?;
+    let start = util::token_amount(&ctx.accounts.pool.ours_quote)?;
     let config = &mut ctx.accounts.config;
     config.switch.old_index_sqrt = spot;
     config.switch.start_amount = start;
@@ -563,21 +576,20 @@ pub struct ClaimFees<'info> {
     pub authority: UncheckedAccount<'info>,
 
     pub pool: OurPool<'info>,
-    pub positions: Positions<'info>,
+    pub position: Slot<'info>,
 
-    /// CHECK: fee recipient's ATA for mint 0 (checked when a share is paid).
+    /// CHECK: fee recipient's ATA for our token (checked when a share is paid).
     #[account(mut)]
-    pub fee_0: UncheckedAccount<'info>,
-    /// CHECK: fee recipient's ATA for mint 1 (checked when a share is paid).
+    pub fee_index: UncheckedAccount<'info>,
+    /// CHECK: fee recipient's ATA for the quote (checked when a share is paid).
     #[account(mut)]
-    pub fee_1: UncheckedAccount<'info>,
+    pub fee_quote: UncheckedAccount<'info>,
 
     pub programs: Programs<'info>,
 }
 
-/// Collects the trading fees the live positions have earned and pays the fee recipient its
-/// share, without touching liquidity. Anyone can call it; the keeper does so periodically and
-/// right before pulling.
+/// Collects the trading fees the live position has earned and pays the fee recipient its share,
+/// without touching liquidity. Anyone can call it; the keeper does so periodically.
 pub fn claim_fees<'info>(ctx: Context<'info, ClaimFees<'info>>) -> Result<()> {
     let config = &ctx.accounts.config;
     require!(matches!(config.switch.phase, Phase::Idle | Phase::Requested), E::WrongPhase);
@@ -585,32 +597,19 @@ pub fn claim_fees<'info>(ctx: Context<'info, ClaimFees<'info>>) -> Result<()> {
     require_keys_eq!(pool_key, config.active_pool, E::WrongPool);
     let authority = ctx.accounts.authority.key();
     let (_, sides) = ctx.accounts.pool.load(config, &config.active_quote, &authority)?;
+    require!(ctx.accounts.position.check(&pool_key, MAIN_SLOT)?.is_some(), E::BadPosition);
     let infos = ctx.accounts.to_account_infos();
     let bump = [config.authority_bump];
     let seeds: &[&[u8]] = &[AUTHORITY_SEED, &bump];
-    let p = &ctx.accounts.pool;
-    let mut fees = [0u64; 2];
-    for i in 0..2u8 {
-        let accounts = ctx.accounts.positions.get(i);
-        let slot = accounts.check(&pool_key, i)?;
-        let Some(st) = ray::read_position(&accounts.personal)? else { continue };
-        if st.liquidity == 0 {
-            continue;
-        }
-        let before = [util::token_amount(p.ours(0))?, util::token_amount(p.ours(1))?];
-        wp::invoke(&ray::decrease_liquidity_ix(authority, pool_key, &sides, &slot, 0), &infos, &[seeds])?;
-        fees[0] += util::token_amount(p.ours(0))? - before[0];
-        fees[1] += util::token_amount(p.ours(1))? - before[1];
-    }
-    let progs = &ctx.accounts.programs;
-    let (m0, m1) = (p.mint_0.to_account_info(), p.mint_1.to_account_info());
-    pay_fee_share(
+    let fees = claim(&ctx.accounts.pool, &sides, ctx.accounts.position.nft_mint.key(), authority, &infos, seeds)?;
+    pay_pool_fees(
         config,
-        [
-            (fees[0], p.ours(0), &ctx.accounts.fee_0.to_account_info(), &m0, &progs.for_mint(&m0)),
-            (fees[1], p.ours(1), &ctx.accounts.fee_1.to_account_info(), &m1, &progs.for_mint(&m1)),
-        ],
+        &ctx.accounts.pool,
+        &ctx.accounts.fee_index,
+        &ctx.accounts.fee_quote,
+        &ctx.accounts.programs,
         &ctx.accounts.authority,
+        fees,
         seeds,
     )
 }
@@ -726,10 +725,6 @@ pub fn hop<'info>(ctx: Context<'info, Hop<'info>>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct Reprice<'info> {
-    /// Pays for the pool when it has to be created.
-    #[account(mut)]
-    pub funder: Signer<'info>,
-
     pub config: Box<Account<'info, Config>>,
 
     /// CHECK: PDA signer.
@@ -737,54 +732,33 @@ pub struct Reprice<'info> {
     pub authority: UncheckedAccount<'info>,
 
     pub pool: OurPool<'info>,
-
-    /// CHECK: address checked.
-    #[account(address = config.clmm_config @ E::WrongPool)]
-    pub amm_config: UncheckedAccount<'info>,
-    /// CHECK: Raydium's PDA for the pool; Raydium validates.
-    #[account(mut)]
-    pub observation: UncheckedAccount<'info>,
-    /// CHECK: Raydium's PDA for the pool; only used to create it.
-    #[account(mut)]
-    pub bitmap: UncheckedAccount<'info>,
-
     pub programs: Programs<'info>,
-    // remaining_accounts: the pool's initialized tick arrays the swap reaches, in swap order.
 }
 
-/// Puts the target pool at the target price: creates it there if it does not exist, otherwise
-/// swaps toward it with the price as the limit. With only our sentinel in the way this costs
-/// next to nothing (we trade with ourselves); other liquidity in the way gets traded against at
-/// prices better than the target. Within PRICE_TOLERANCE_BPS of the target it does nothing.
+/// Moves a pool the coin has used before to the target price by swapping through its sentinel
+/// (and anyone else's liquidity, which gets traded against at prices better than the target).
+/// A no-op for a pool that doesn't exist yet (`add` creates it at the target) or one already
+/// within PRICE_TOLERANCE_BPS of it.
 pub fn reprice<'info>(ctx: Context<'info, Reprice<'info>>) -> Result<()> {
     let config = &ctx.accounts.config;
     require!(config.switch.phase == Phase::Repricing, E::WrongPhase);
     let target = config.switch.target;
-    let pool_key = ctx.accounts.pool.pool.key();
-    require_keys_eq!(pool_key, expected_pool(config, &target), E::WrongPool);
     let authority = ctx.accounts.authority.key();
     let (state, sides) = ctx.accounts.pool.load(config, &target, &authority)?;
-    let target_sqrt = math::flip(config.switch.target_index_sqrt, !config.index_is_a(&target));
-    require!((math::MIN_SQRT_PRICE..math::MAX_SQRT_PRICE).contains(&target_sqrt), E::InvalidParam);
-    let mut infos = ctx.accounts.to_account_infos();
-
-    let Some(ps) = state else {
-        let ix = ray::create_pool_ix(ctx.accounts.funder.key(), config.clmm_config, pool_key, &sides, target_sqrt);
-        return wp::invoke(&ix, &infos, &[]);
-    };
-    if within_bps(ps.sqrt_price, target_sqrt, PRICE_TOLERANCE_BPS) {
-        // Close enough for `add`; a swap this small may not even move a token through.
+    let Some(ps) = state else { return Ok(()) };
+    let goal = clamp_to_range(config.switch.target_index_sqrt, &ps);
+    if within_bps(ps.sqrt_price, goal, PRICE_TOLERANCE_BPS) {
         return Ok(());
     }
-    let zero_for_one = ps.sqrt_price > target_sqrt;
-    let input = if zero_for_one { 0 } else { 1 };
-    let amount = util::token_amount(ctx.accounts.pool.ours(input))?;
+    require!(ps.liquidity > 0, E::NothingToReprice);
+    let up = goal > ps.sqrt_price; // buying our token with the quote
+    let (index, quote) = ctx.accounts.pool.balances()?;
+    let have = if up { quote } else { index };
+    let amount = damm::input_to_move(ps.liquidity, ps.sqrt_price, goal).min(have as u128) as u64;
     require!(amount > 0, E::NothingToReprice);
-    let arrays: Vec<Pubkey> = ctx.remaining_accounts.iter().map(|a| a.key()).collect();
-    infos.extend_from_slice(ctx.remaining_accounts);
-    let ix = ray::swap_ix(authority, config.clmm_config, pool_key, &sides, zero_for_one, amount, 0, target_sqrt, &arrays);
+    let ix = damm::swap_ix(authority, &sides, !up, amount, 0);
     let bump = [config.authority_bump];
-    wp::invoke(&ix, &infos, &[&[AUTHORITY_SEED, &bump]])
+    wp::invoke(&ix, &ctx.accounts.to_account_infos(), &[&[AUTHORITY_SEED, &bump]])
 }
 
 // =============================================================================================
@@ -798,56 +772,57 @@ pub struct Seed<'info> {
 
     pub config: Box<Account<'info, Config>>,
 
-    /// CHECK: PDA signer; pays Raydium's rent.
+    /// CHECK: PDA signer; pays DAMM's rent.
     #[account(mut, seeds = [AUTHORITY_SEED], bump = config.authority_bump)]
     pub authority: UncheckedAccount<'info>,
 
     pub pool: OurPool<'info>,
-    pub sentinel: SlotAccounts<'info>,
+    pub sentinel: Slot<'info>,
     pub programs: Programs<'info>,
 }
 
-/// Opens the target pool's sentinel: a full-range position holding 1/SENTINEL_DIVISOR of the
-/// backing (all of it when it is dust) and the matching index, never pulled. Later visits reprice by swapping
-/// through it, which a Raydium pool with no liquidity cannot do. Runs during repricing, at
-/// whatever price the pool has; a no-op if the pool already has one.
+/// Opens the sentinel of a pool the coin has used before but that has none, at whatever price
+/// the pool has, so `reprice` has something to swap through. `add` opens it for new pools.
 pub fn seed<'info>(ctx: Context<'info, Seed<'info>>) -> Result<()> {
     let config = &ctx.accounts.config;
     require!(config.switch.phase == Phase::Repricing, E::WrongPhase);
     let target = config.switch.target;
-    let pool_key = ctx.accounts.pool.pool.key();
-    require_keys_eq!(pool_key, expected_pool(config, &target), E::WrongPool);
     let authority = ctx.accounts.authority.key();
     let (state, sides) = ctx.accounts.pool.load(config, &target, &authority)?;
     let ps = state.ok_or(E::WrongPool)?;
-    let sentinel = &ctx.accounts.sentinel;
-    sentinel.check(&pool_key, SENTINEL_SLOT)?;
-    if !sentinel.personal.data_is_empty() {
+    let pool_key = sides.pool;
+    if ctx.accounts.sentinel.check(&pool_key, SENTINEL_SLOT)?.is_some() {
         return Ok(());
     }
-
-    let ts = ps.tick_spacing as i32;
-    let max_t = math::max_usable_tick(ts);
-    let p = &ctx.accounts.pool;
-    let have = [util::token_amount(p.ours(0))?, util::token_amount(p.ours(1))?];
-    let want = have.map(sentinel_share);
-    let l0 = liquidity_for(true, want[0], ps.sqrt_price, -max_t, max_t);
-    let l1 = liquidity_for(false, want[1], ps.sqrt_price, -max_t, max_t);
-    require!(l0 > 1 && l1 > 1, E::NothingToReprice);
-    // Size from the scarcer side; the other side's need is then within its share.
-    let base_0 = l0 <= l1;
-    let amount_max = if base_0 { [want[0], have[1]] } else { [have[0], want[1]] };
-
-    fund_authority(
-        &ctx.accounts.funder,
-        &ctx.accounts.authority,
-        &ctx.accounts.programs.system_program,
-        sentinel.rent_needed()?,
-    )?;
+    let (index, quote) = ctx.accounts.pool.balances()?;
+    let l = liquidity_for(sentinel_share(index), sentinel_share(quote), ps.sqrt_price, ps.sqrt_min, ps.sqrt_max);
+    require!(l > 0, E::NothingToReprice);
+    fund_authority(&ctx.accounts.funder, &ctx.accounts.authority, &ctx.accounts.programs.system_program, Slot::rent()?)?;
     let infos = ctx.accounts.to_account_infos();
     let bump = [config.authority_bump];
     let auth_seeds: &[&[u8]] = &[AUTHORITY_SEED, &bump];
-    sentinel.open(&pool_key, SENTINEL_SLOT, &sides, ts, (-max_t, max_t), amount_max, base_0, authority, &infos, auth_seeds)
+    open(&ctx.accounts.sentinel, &sides, SENTINEL_SLOT, l, index, quote, authority, &infos, auth_seeds)
+}
+
+/// Opens slot `i` and adds `liquidity` to it, paying at most (max_index, max_quote).
+#[allow(clippy::too_many_arguments)]
+fn open<'info>(
+    slot: &Slot<'info>,
+    sides: &damm::Sides,
+    i: u8,
+    liquidity: u128,
+    max_index: u64,
+    max_quote: u64,
+    authority: Pubkey,
+    infos: &[AccountInfo<'info>],
+    auth_seeds: &[&[u8]],
+) -> Result<()> {
+    require!(slot.check(&sides.pool, i)?.is_none(), E::BadPosition);
+    let nft = slot.nft_mint.key();
+    let (idx, bump) = Slot::mint_seeds(&sides.pool, i);
+    let mint_seeds: &[&[u8]] = &[POSITION_MINT_SEED, sides.pool.as_ref(), &idx, &bump];
+    wp::invoke(&damm::create_position_ix(authority, nft, sides.pool), infos, &[auth_seeds, mint_seeds])?;
+    wp::invoke(&damm::add_liquidity_ix(authority, nft, sides, liquidity, max_index, max_quote), infos, &[auth_seeds])
 }
 
 // =============================================================================================
@@ -855,19 +830,20 @@ pub fn seed<'info>(ctx: Context<'info, Seed<'info>>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct Add<'info> {
-    /// Tops up the authority for the positions' rent (refunded to it when they are pulled).
+    /// Tops up the authority for rent (the position's is refunded when it is pulled).
     #[account(mut)]
     pub funder: Signer<'info>,
 
     #[account(mut, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
 
-    /// CHECK: PDA signer; pays Raydium's rent.
+    /// CHECK: PDA signer; pays DAMM's rent.
     #[account(mut, seeds = [AUTHORITY_SEED], bump = config.authority_bump)]
     pub authority: UncheckedAccount<'info>,
 
     pub pool: OurPool<'info>,
-    pub positions: Positions<'info>,
+    pub position: Slot<'info>,
+    pub sentinel: Slot<'info>,
 
     /// CHECK: PDA.
     #[account(mut, seeds = [ESCROW_SEED], bump = config.escrow_bump)]
@@ -880,55 +856,67 @@ pub struct Add<'info> {
     pub programs: Programs<'info>,
 }
 
+/// Lays the backing and every index token into the target pool. A new pool is created at the
+/// target price with the floor that the backing reaches as its lower bound, and gets its
+/// sentinel here too. A pool used before keeps its range: it must be at the target already
+/// (`reprice`), and whatever its range can't take of one side stays with the program until the
+/// next switch.
 pub fn add<'info>(ctx: Context<'info, Add<'info>>) -> Result<()> {
     let config = &ctx.accounts.config;
     require!(config.switch.phase == Phase::Repricing, E::WrongPhase);
     let target = config.switch.target;
-    let pool_key = ctx.accounts.pool.pool.key();
-    require_keys_eq!(pool_key, expected_pool(config, &target), E::WrongPool);
     let authority = ctx.accounts.authority.key();
     let (state, sides) = ctx.accounts.pool.load(config, &target, &authority)?;
-    let ps = state.ok_or(E::WrongPool)?;
-    let index_is_0 = config.index_is_a(&target);
-    require!(
-        within_bps(ps.sqrt_price, math::flip(config.switch.target_index_sqrt, !index_is_0), PRICE_TOLERANCE_BPS),
-        E::NotAtTarget
-    );
-
-    let p = &ctx.accounts.pool;
-    let (qi, ii) = if index_is_0 { (1, 0) } else { (0, 1) };
-    let index_balance = util::token_amount(p.ours(ii))?;
-    let quote_balance = util::token_amount(p.ours(qi))?;
-    let (index_range, backing_range) = plan_positions(index_is_0, &ps, config.switch.target_floor_sqrt);
-    let ts = ps.tick_spacing as i32;
-    let pos = &ctx.accounts.positions;
-
-    fund_authority(
-        &ctx.accounts.funder,
-        &ctx.accounts.authority,
-        &ctx.accounts.programs.system_program,
-        pos.slot_0.rent_needed()? + pos.slot_1.rent_needed()?,
-    )?;
-    let infos = ctx.accounts.to_account_infos();
+    let pool_key = sides.pool;
+    let (index, quote) = ctx.accounts.pool.balances()?;
+    let rent = Rent::get()?;
     let bump = [config.authority_bump];
     let auth_seeds: &[&[u8]] = &[AUTHORITY_SEED, &bump];
 
-    // Backing first: when it straddles the price it takes a sliver of index too.
-    if let Some(range) = backing_range {
-        if liquidity_for(!index_is_0, quote_balance, ps.sqrt_price, range.0, range.1) > 1 {
-            let mut max = [0u64; 2];
-            max[qi] = quote_balance;
-            max[ii] = index_balance;
-            pos.slot_1.open(&pool_key, 1, &sides, ts, range, max, !index_is_0, authority, &infos, auth_seeds)?;
+    let (sqrt_price, sqrt_min) = match state {
+        None => {
+            let p = config.switch.target_index_sqrt.clamp(damm::MIN_SQRT_PRICE + 1, damm::MAX_SQRT_PRICE / 2);
+            // DAMM moves at least one unit of each token into a new pool.
+            require!(quote > 0 && index > 0, E::NothingToReprice);
+            // The sentinel needs some quote of its own, with at least a unit left for the pool.
+            let with_sentinel = ctx.accounts.sentinel.check(&pool_key, SENTINEL_SLOT)?.is_none() && quote >= 2;
+            let (si, sq) = if with_sentinel { (sentinel_share(index), sentinel_share(quote).min(quote - 1)) } else { (0, 0) };
+            let (main_index, main_quote) = (index - si, (quote - sq).max(1));
+            let l = damm::liquidity_from_a(main_index, p, damm::MAX_SQRT_PRICE);
+            let l = l.saturating_sub(l / 1_000_000 + 1);
+            let sqrt_min = damm::floor_for(main_quote, l, p).min(p);
+            let mut need = rent.minimum_balance(damm::POOL_LEN) + 2 * rent.minimum_balance(damm::TOKEN_ACCOUNT_LEN) + Slot::rent()?;
+            if with_sentinel {
+                need += Slot::rent()?;
+            }
+            fund_authority(&ctx.accounts.funder, &ctx.accounts.authority, &ctx.accounts.programs.system_program, need)?;
+            let infos = ctx.accounts.to_account_infos();
+            let nft = ctx.accounts.position.nft_mint.key();
+            require!(ctx.accounts.position.check(&pool_key, MAIN_SLOT)?.is_none(), E::BadPosition);
+            let (idx, mb) = Slot::mint_seeds(&pool_key, MAIN_SLOT);
+            let mint_seeds: &[&[u8]] = &[POSITION_MINT_SEED, pool_key.as_ref(), &idx, &mb];
+            let ix = damm::create_pool_ix(authority, nft, &sides, sqrt_min, p, l);
+            wp::invoke(&ix, &infos, &[auth_seeds, mint_seeds])?;
+            if with_sentinel {
+                let (index, quote) = ctx.accounts.pool.balances()?;
+                let ls = liquidity_for(index.min(si), quote.min(sq), p, sqrt_min, damm::MAX_SQRT_PRICE);
+                if ls > 0 {
+                    open(&ctx.accounts.sentinel, &sides, SENTINEL_SLOT, ls, index, quote, authority, &infos, auth_seeds)?;
+                }
+            }
+            (p, sqrt_min)
         }
-    }
-    let index_left = util::token_amount(p.ours(ii))?;
-    if index_range.0 < index_range.1 && liquidity_for(index_is_0, index_left, ps.sqrt_price, index_range.0, index_range.1) > 1 {
-        let mut max = [0u64; 2];
-        max[ii] = index_left;
-        max[qi] = util::token_amount(p.ours(qi))?;
-        pos.slot_0.open(&pool_key, 0, &sides, ts, index_range, max, index_is_0, authority, &infos, auth_seeds)?;
-    }
+        Some(ps) => {
+            let goal = clamp_to_range(config.switch.target_index_sqrt, &ps);
+            require!(within_bps(ps.sqrt_price, goal, PRICE_TOLERANCE_BPS), E::NotAtTarget);
+            let l = liquidity_for(index, quote, ps.sqrt_price, ps.sqrt_min, ps.sqrt_max);
+            require!(l > 0, E::NothingToReprice);
+            fund_authority(&ctx.accounts.funder, &ctx.accounts.authority, &ctx.accounts.programs.system_program, Slot::rent()?)?;
+            let infos = ctx.accounts.to_account_infos();
+            open(&ctx.accounts.position, &sides, MAIN_SLOT, l, index, quote, authority, &infos, auth_seeds)?;
+            (ps.sqrt_price, ps.sqrt_min)
+        }
+    };
 
     let escrowed = config.switch.escrowed;
     if escrowed > 0 {
@@ -947,9 +935,7 @@ pub fn add<'info>(ctx: Context<'info, Add<'info>>) -> Result<()> {
     }
 
     let now = Clock::get()?.unix_timestamp;
-    let used_index = index_balance - util::token_amount(p.ours(ii))?;
-    let used_quote = quote_balance - util::token_amount(p.ours(qi))?;
-    let index_sqrt = math::flip(ps.sqrt_price, !index_is_0);
+    let (index_left, quote_left) = ctx.accounts.pool.balances()?;
     let config = &mut ctx.accounts.config;
     let s = config.switch;
     if escrowed > 0 {
@@ -958,17 +944,17 @@ pub fn add<'info>(ctx: Context<'info, Add<'info>>) -> Result<()> {
     }
     config.active_quote = target;
     config.active_pool = pool_key;
-    config.floor_sqrt = s.target_floor_sqrt;
+    config.floor_sqrt = sqrt_min;
     // The average restarts here, so the next pull waits out the warm-up: a natural cooldown.
-    config.pool_ema = Ema { sqrt_price: index_sqrt, last_ts: now, streak_start: now };
+    config.pool_ema = Ema { sqrt_price, last_ts: now, streak_start: now };
     config.switch = Switch::default();
     emit!(Switched {
         requester: s.requester,
         quote: target,
         pool: pool_key,
-        index_sqrt,
-        index_amount: used_index,
-        quote_amount: used_quote,
+        index_sqrt: sqrt_price,
+        index_amount: index - index_left,
+        quote_amount: quote - quote_left,
         burned: escrowed,
     });
     Ok(())

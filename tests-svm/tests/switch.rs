@@ -1,6 +1,6 @@
 //! Quote switching end to end against real Raydium (ours) and Orca (route) pools.
 
-use chamelequote::{math, raydium as ray, state::Phase};
+use chamelequote::{damm, math, state::Phase};
 use chamelequote_tests::*;
 
 fn assert_close(a: f64, b: f64, tol: f64, what: &str) {
@@ -104,10 +104,10 @@ fn fee_share_goes_to_recipient() {
         let x = env.x;
         env.request(&whale, x).unwrap();
         env.crank().unwrap();
-        // $50k bought through a 1% pool: ~$420 of fees after Raydium's 16% cut, 10% to the
+        // $50k bought through a 1% pool: ~$400 of fees after DAMM's 20% cut, 10% to the
         // recipient (claimed right before the pull).
         let got = env.balance(&fee_ata) as f64 / 1e6;
-        assert!((40.0..=60.0).contains(&got), "fee share: ${got}");
+        assert!((35.0..=60.0).contains(&got), "fee share: ${got}");
     }
 }
 
@@ -248,31 +248,34 @@ fn abort_refunds_and_lands_where_the_backing_is() {
 }
 
 #[test]
-fn reprice_moves_a_preexisting_pool_created_at_a_silly_price() {
-    for order in ORDERS {
-        let (mut env, whale) = traded_ordered(order);
-        let x = env.x;
-        let usd0 = env.index_usd();
-        let c = env.config();
-        let griefed = chamelequote::instructions::expected_pool(&c, &x);
-        let mints = chamelequote::instructions::pool_mints(&c, &x);
-        // Griefer pre-creates TOKEN/X at a silly price (1000 raw X per raw token), no liquidity.
-        let silly = math::flip(math::sqrt_ratio(1_000, 1).unwrap(), !c.index_is_a(&x));
-        let griefer = env.funded();
-        let sides = ray::Sides {
-            mint: mints,
-            program: [anchor_spl::token::spl_token::ID; 2],
-            ours: [anchor_lang::prelude::Pubkey::default(); 2],
-            vault: mints.map(|m| ray::vault_address(&griefed, &m)),
-        };
-        env.send(&[ray::create_pool_ix(griefer.pubkey(), CLMM_CONFIG, griefed, &sides, silly)], &[&griefer]).unwrap();
-        env.request(&whale, x).unwrap();
-        env.crank().unwrap();
-        assert_eq!(env.config().active_pool, griefed);
-        let labels: Vec<_> = env.crank_cu.iter().map(|s| s.0).collect();
-        assert!(labels.contains(&"seed") && labels.contains(&"reprice"), "{labels:?}");
-        assert_close(env.index_usd(), usd0, 0.01, "repriced to fair");
-    }
+fn a_pool_someone_else_created_is_refused_before_anything_burns() {
+    let (mut env, whale) = traded();
+    let (x, mint) = (env.x, env.mint);
+    // Griefer pre-creates the TOKEN/X DAMM pool (the one address our X pool would have).
+    let griefer = env.funded();
+    env.mint_to(&griefer.pubkey(), &x, 1_000_000);
+    env.buy(&griefer, 1_000_000).unwrap();
+    let pool = chamelequote::instructions::expected_pool(&env.config(), &x);
+    let sides = damm::Sides {
+        pool,
+        mint_a: mint,
+        mint_b: x,
+        program_a: anchor_spl::token::spl_token::ID,
+        program_b: anchor_spl::token::spl_token::ID,
+        ours_a: chamelequote::whirlpool::ata(&griefer.pubkey(), &mint, &anchor_spl::token::spl_token::ID),
+        ours_b: chamelequote::whirlpool::ata(&griefer.pubkey(), &x, &anchor_spl::token::spl_token::ID),
+        vault_a: damm::vault_address(&pool, &mint),
+        vault_b: damm::vault_address(&pool, &x),
+    };
+    let nft = Kp::new();
+    let p = math::sqrt_ratio(1_000, 1).unwrap();
+    let ix = damm::create_pool_ix(griefer.pubkey(), nft.pubkey(), &sides, p / 2, p, 1u128 << 70);
+    env.send(&[ix], &[&griefer, &nft]).unwrap();
+    let whale_token = chamelequote::whirlpool::ata(&whale.pubkey(), &mint, &anchor_spl::token::spl_token::ID);
+    let before = env.balance(&whale_token);
+    let err = env.request(&whale, x).unwrap_err();
+    assert!(err.contains("ForeignPool"), "{err}");
+    assert_eq!(env.balance(&whale_token), before, "nothing burned");
 }
 
 /// Prints value carried across each switch and compute used per crank step; fails if any step
@@ -346,9 +349,9 @@ fn claim_fees_pays_the_recipient_without_touching_liquidity() {
     let cranker = env.funded();
     let action = env.crank_as(&cranker.pubkey()).claim_fees().unwrap();
     env.send(&action.ixs, &[&cranker]).unwrap();
-    // $50k bought through a 1% pool: ~$420 of fees after Raydium's 16% cut, 10% share here.
+    // $50k bought through a 1% pool: ~$400 of fees after DAMM's 20% cut, 10% share here.
     let got = env.balance(&fee_ata) as f64 / 1e6;
-    assert!((40.0..=60.0).contains(&got), "fee share: ${got}");
+    assert!((35.0..=60.0).contains(&got), "fee share: ${got}");
     assert_eq!((env.our_pool(&pool).liquidity, env.our_pool(&pool).sqrt_price), (liq, price), "liquidity untouched");
     // Claiming again right away pays nothing new.
     let action = env.crank_as(&cranker.pubkey()).claim_fees().unwrap();
@@ -390,17 +393,18 @@ fn fast_switches_pack_into_few_transactions() {
         let (x, wsol, y, usdc) = (env.x, env.wsol, env.y, env.usdc);
         let usd0 = env.index_usd();
         let plan = [
-            ("USDC->X (new pool)", x, 2),
-            ("X->SOL (new pool)", wsol, 2),
-            ("SOL->Y (new pool)", y, 2),
-            ("Y->X (revisit, 3 hops)", x, 2),
-            ("X->USDC (revisit, no sentinel yet)", usdc, 2),
+            ("USDC->X (new pool)", x, 1),
+            ("X->SOL (new pool, 2 hops)", wsol, 1),
+            ("SOL->Y (new pool)", y, 1),
+            ("Y->X (revisit, 3 hops)", x, 1),
+            ("X->USDC (revisit, no sentinel yet)", usdc, 1),
             ("USDC->X (revisit, 1 hop)", x, 1),
         ];
         for (name, target, txs) in plan {
             env.request(&whale, target).unwrap();
             eprintln!("{name}:");
-            assert_eq!(fast_switch(&mut env, target), txs, "{name}");
+            let n = fast_switch(&mut env, target);
+            assert!(n <= txs, "{name}: {n} transactions");
             env.keep(660);
         }
         assert_close(env.index_usd(), usd0, 0.05, "after six fast switches");
@@ -473,8 +477,8 @@ fn dust_backing_still_seeds_and_comes_back() {
         env.keep(660);
         env.request(&whale, x).unwrap();
         env.crank().unwrap();
-        let labels: Vec<_> = env.crank_cu.iter().map(|s| s.0).collect();
-        assert!(labels.contains(&"seed"), "dust backing still funds a sentinel: {labels:?}");
+        let x_pool = env.config().active_pool;
+        assert!(env.crank_as(&authority()).has_sentinel(&x_pool), "dust backing still funds a sentinel");
         env.keep(660);
         // Back to the launch pool, which has no sentinel (nothing to fund one at launch).
         env.request(&whale, usdc).unwrap();

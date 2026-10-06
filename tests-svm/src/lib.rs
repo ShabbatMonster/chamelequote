@@ -1,6 +1,6 @@
-//! LiteSVM harness: our dev build, Metaplex, Orca Whirlpools and Raydium CLMM (dumped from
-//! mainnet), Orca's mainnet WhirlpoolsConfig and fee tiers, Raydium's 1% AmmConfig, and a small
-//! market (route pools on Orca; our own pools are Raydium):
+//! LiteSVM harness: our dev build, Metaplex, Orca Whirlpools, Meteora DAMM v2 and Raydium CLMM
+//! (dumped from mainnet), Orca's mainnet WhirlpoolsConfig and fee tiers, Raydium's 1% AmmConfig
+//! (for the migration test), and a small market (route pools on Orca; our own pools are DAMM v2):
 //!
 //!   USDC (6dp)  -- root hub
 //!   WSOL (9dp)  -- hub, routed via a SOL/USDC pool ($150)
@@ -22,6 +22,7 @@ use chamelequote::{
     instructions::InitializeParams,
     math,
     metaplex::{metadata_address, TOKEN_METADATA_ID},
+    damm,
     raydium as ray,
     state::{Config, QuoteEntry, AUTHORITY_SEED, CONFIG_SEED, ESCROW_SEED, QUOTE_SEED},
     whirlpool::{self as wp, PoolState, Sides},
@@ -173,8 +174,13 @@ impl Env {
         wp::parse_pool(&self.svm.get_account(pool).unwrap().data).unwrap()
     }
 
-    /// One of our Raydium pools.
-    pub fn our_pool(&self, pool: &Pubkey) -> ray::PoolState {
+    /// One of our DAMM v2 pools.
+    pub fn our_pool(&self, pool: &Pubkey) -> damm::PoolState {
+        damm::parse_pool(&self.svm.get_account(pool).unwrap().data).unwrap()
+    }
+
+    /// A Raydium pool (the venue before DAMM v2, for the migration test).
+    pub fn ray_pool(&self, pool: &Pubkey) -> ray::PoolState {
         ray::parse_pool(&self.svm.get_account(pool).unwrap().data).unwrap()
     }
 
@@ -315,10 +321,29 @@ impl Env {
         self.send(&[ix], &[user])
     }
 
-    /// A plain user trade through one of our Raydium pools, as far as `amount` goes (or to
-    /// `limit` if non-zero).
-    pub fn our_swap(&mut self, user: &Keypair, pool: &Pubkey, zero_for_one: bool, amount: u64, limit: u128) -> Result<(), String> {
+    /// A plain user trade through one of our DAMM v2 pools (`a_to_b`: selling our token).
+    pub fn our_swap(&mut self, user: &Keypair, pool: &Pubkey, a_to_b: bool, amount: u64) -> Result<(), String> {
         let p = self.our_pool(pool);
+        self.ensure_ata(&user.pubkey(), &p.mint_a);
+        self.ensure_ata(&user.pubkey(), &p.mint_b);
+        let sides = damm::Sides {
+            pool: *pool,
+            mint_a: p.mint_a,
+            mint_b: p.mint_b,
+            program_a: spl_token::ID,
+            program_b: spl_token::ID,
+            ours_a: ata(&user.pubkey(), &p.mint_a),
+            ours_b: ata(&user.pubkey(), &p.mint_b),
+            vault_a: p.vault_a,
+            vault_b: p.vault_b,
+        };
+        self.send(&[damm::swap_ix(user.pubkey(), &sides, a_to_b, amount, 0)], &[user])
+    }
+
+    /// A plain user trade through a Raydium pool, as far as `amount` goes (or to `limit` if
+    /// non-zero).
+    pub fn ray_swap(&mut self, user: &Keypair, pool: &Pubkey, zero_for_one: bool, amount: u64, limit: u128) -> Result<(), String> {
+        let p = self.ray_pool(pool);
         self.ensure_ata(&user.pubkey(), &p.mint_0);
         self.ensure_ata(&user.pubkey(), &p.mint_1);
         let sides = ray::Sides {
@@ -340,20 +365,28 @@ impl Env {
         self.send(&[ix], &[user])
     }
 
+    fn active_is_raydium(&self) -> bool {
+        self.svm.get_account(&self.config().active_pool).is_some_and(|a| a.owner == ray::CLMM_ID)
+    }
+
     /// Buys our token with `amount` of the active quote.
     pub fn buy(&mut self, user: &Keypair, amount: u64) -> Result<(), String> {
         let c = self.config();
         self.mint_to(&user.pubkey(), &c.active_quote, amount);
-        // Paying quote: token 1 when our token is token 0.
-        let zero_for_one = !c.index_is_a(&c.active_quote);
-        self.our_swap(user, &c.active_pool, zero_for_one, amount, 0)
+        if self.active_is_raydium() {
+            // Paying quote: token 1 when our token is token 0.
+            return self.ray_swap(user, &c.active_pool, !c.index_is_a(&c.active_quote), amount, 0);
+        }
+        self.our_swap(user, &c.active_pool, false, amount)
     }
 
     /// Sells `amount` of our token into the active pool.
     pub fn sell(&mut self, user: &Keypair, amount: u64) -> Result<(), String> {
         let c = self.config();
-        let zero_for_one = c.index_is_a(&c.active_quote);
-        self.our_swap(user, &c.active_pool, zero_for_one, amount, 0)
+        if self.active_is_raydium() {
+            return self.ray_swap(user, &c.active_pool, c.index_is_a(&c.active_quote), amount, 0);
+        }
+        self.our_swap(user, &c.active_pool, true, amount)
     }
 
     // -----------------------------------------------------------------------------------------
@@ -377,6 +410,7 @@ impl Env {
         svm.add_program_from_file(TOKEN_METADATA_ID, "fixtures/mpl_token_metadata.so").unwrap();
         svm.add_program_from_file(wp::WHIRLPOOL_ID, "fixtures/whirlpool.so").unwrap();
         svm.add_program_from_file(ray::CLMM_ID, "fixtures/raydium_clmm.so").unwrap();
+        svm.add_program_from_file(damm::DAMM_ID, "fixtures/damm_v2.so").unwrap();
         for (file, owner) in [("fixtures/whirlpool_accounts.json", wp::WHIRLPOOL_ID), ("fixtures/raydium_accounts.json", ray::CLMM_ID)] {
             let fixtures: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
             for (_, v) in fixtures.as_object().unwrap() {
@@ -570,27 +604,17 @@ impl Env {
                 .to_account_metas(None),
             data: instruction::Launch { index_sqrt }.data(),
         };
-        self.send(&[ix], &[&admin])
+        self.send(&[ix], &[&admin])?;
+        // DAMM moves at least one unit of each token into a new pool, and at launch there is no
+        // backing yet: one raw unit of the quote stands in.
+        self.mint_to(&authority(), &quote, 1);
+        Ok(())
     }
 
     pub fn request_ix(&self, user: &Pubkey, user_token: Pubkey, target: Pubkey) -> Instruction {
-        let c = self.config();
-        Instruction {
-            program_id: PROGRAM_ID,
-            accounts: accounts::RequestSwitch {
-                user: *user,
-                config: config_pda(),
-                mint: self.mint,
-                user_token,
-                escrow: escrow(),
-                old_quote: quote_pda(&c.active_quote),
-                new_quote: quote_pda(&target),
-                wsol_quote: quote_pda(&self.wsol),
-                token_program: spl_token::ID,
-            }
-            .to_account_metas(None),
-            data: instruction::RequestSwitch {}.data(),
-        }
+        let mut ix = chamelequote_crank::request_switch_ix(user, &self.config(), &target);
+        ix.accounts[3].pubkey = user_token;
+        ix
     }
 
     pub fn request(&mut self, user: &Keypair, target: Pubkey) -> Result<(), String> {
@@ -608,7 +632,7 @@ impl Env {
     pub fn pull_ix(&mut self, cranker: &Pubkey) -> Instruction {
         let c = self.config();
         let fee = self.fee_recipient.pubkey();
-        for m in chamelequote::instructions::pool_mints(&c, &c.active_quote) {
+        for m in [c.mint, c.active_quote] {
             self.ensure_ata(&fee, &m);
         }
         self.crank_as(cranker).pull_ix()
@@ -672,7 +696,7 @@ impl Env {
     pub fn index_usd(&self) -> f64 {
         let c = self.config();
         let sqrt = self.crank_as(&Pubkey::default()).our_sqrt(&c.active_pool).unwrap();
-        let index_per = f(math::flip(sqrt, !c.index_is_a(&c.active_quote))); // quote per index
+        let index_per = f(sqrt); // quote per index
         index_per * self.quote_usd(&c.active_quote)
     }
 

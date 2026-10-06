@@ -2,10 +2,10 @@
 
 A Solana coin whose holders can change two things by burning 1,000,000 tokens:
 
-- **The quote token.** All of the coin's liquidity sits in a Raydium CLMM pool, in positions owned by the program (Raydium because screeners like Axiom index its pools whatever the quote; route pools for swapping the backing are Orca Whirlpools). A burn re-pairs it with another approved token (tokenized stocks like TSLAX, USDC, SOL, …). The backing is swapped at the realised exchange rate and the price carries over, the way the Ethereum "LOOP" rotation manager does it.
+- **The quote token.** All of the coin's liquidity sits in a Meteora DAMM v2 pool, in a position owned by the program (screeners like Axiom index DAMM v2 pools whatever the quote; route pools for swapping the backing are Orca Whirlpools). A burn re-pairs it with another approved token (tokenized stocks like TSLAX, USDC, SOL, …). The backing is swapped at the realised exchange rate and the price carries over, the way the Ethereum "LOOP" rotation manager does it.
 - **The name, ticker and picture.** The program's PDA is the only Metaplex update authority, so a rename burns and rewrites the metadata in one instruction. No admin can override or revert it.
 
-Status: tested locally with LiteSVM against the real Raydium CLMM, Orca and Metaplex programs. **Not audited.** Mainnet runs the earlier Orca-only build; `tests-svm/tests/migration.rs` upgrades that exact binary to this one and moves the liquidity to Raydium.
+Status: tested locally with LiteSVM against the real Meteora DAMM v2, Orca, Raydium CLMM and Metaplex programs. **Not audited.** Mainnet runs the earlier Raydium build; `tests-svm/tests/migration.rs` upgrades that exact binary to this one and moves the liquidity to DAMM v2.
 
 ## Layout
 
@@ -24,9 +24,9 @@ Status: tested locally with LiteSVM against the real Raydium CLMM, Orca and Meta
 2. The keeper (anyone, really) cranks it:
    - `pull`: closes the program's positions in the current pool, collecting fees.
    - `hop`: swaps the backing one Orca route pool at a time, via USDC or SOL, checked against on-chain price averages.
-   - `reprice`: creates the target Raydium pool at the translated price, or swaps it there.
-   - `seed`: the first time a pool is used, leaves a small full-range "sentinel" position in it for good (0.1% of the backing). A Raydium swap cannot move an empty pool's price, so this is what lets a later `reprice` work.
-   - `add`: lays the liquidity back as two positions: tokens above the price, backing from the floor up to the price, meeting at a tick next to the price so the pool always has liquidity there. The escrowed burn is burned here.
+   - `reprice`: if the coin has used the target pool before, swaps it to the translated price through its sentinel.
+   - `seed`: gives an old pool that has none a sentinel first.
+   - `add`: lays the liquidity back as one position over the pool's range: unsold tokens from the price up, backing from the floor up to the price. A new pool is created here at the translated price, with the floor as its lower bound, and gets its sentinel: a small position (0.1% of the backing) left in every pool for good, since a pool with no liquidity can't be moved to a new price. The escrowed burn is burned here.
 3. If a switch is not done within 10 minutes, `abort` refunds the burn and lays the backing into whatever token it is held in.
 
 The price averages refuse trades during sharp moves: after a 2x pump, switching waits roughly 25 minutes.
@@ -60,5 +60,6 @@ It needs a funded wallet. Each poke round costs a few transactions a minute, and
 - Unaudited. The price-average manipulation defence is the part to audit first.
 - Tokenized stocks (xStocks) are issued by a company that can freeze or move them, including the coin's backing while it sits in one.
 - The admin key can list quotes (it can't touch funds or metadata). Renounce it with `set_admin(default)` once the list is final.
-- A Raydium pool can only be moved to a new price by swapping through liquidity, so a switch back into a pool with no sentinel needs some backing to seed one. A pool lacks a sentinel only if the backing was exactly zero when the coin first used it (the launch pool, or switches before anyone bought). Coming back to such a pool while the backing is still zero, at a price more than 0.25% away, stalls in the repricing step, and that step can't be aborted.
-- Each switch into a pool the coin has never used costs the keeper about 0.35 SOL of rent (pool accounts and 10 KB tick arrays, which Raydium never closes). Position rent is refunded when the positions are pulled.
+- A DAMM v2 pool's range is fixed when it is created, and there is one pool per quote. When the coin comes back to a quote, part of the backing or of the unsold coins may not fit the old range and waits outside the pool until the next switch; a request that would land below the old floor is refused before anything burns. A pool for a quote created by someone else is refused too.
+- That refusal happens at request time for the target only. A switch aborted after its deadline lands in whichever hub (USDC or SOL) the backing is in; if someone had created that hub's pool for this coin first, the landing would stall. Running a switch through each hub early, so the program owns those pools, closes this.
+- A switch into a pool that doesn't exist yet costs the requester 0.03 SOL (to the fee recipient, who funds the keeper): the rent of the pool and its sentinel.

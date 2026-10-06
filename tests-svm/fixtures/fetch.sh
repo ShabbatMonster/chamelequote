@@ -8,3 +8,4 @@ solana program dump -u "$URL" metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s mpl_to
 solana program dump -u "$URL" CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK raydium_clmm.so
 # The program as deployed before the move to Raydium (for the migration test).
 solana program dump -u "$URL" 3ZYVePG4LhBWH9JvhGcExo1ysX6mWAwTGavBvyMgM3Ws chamelequote_mainnet_v1.so
+solana program dump -u "$URL" cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG damm_v2.so
