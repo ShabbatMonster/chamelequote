@@ -16,6 +16,7 @@ const METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
 // Anchor discriminators: sha256("global:<ix>" / "account:<T>" / "event:<E>")[0..8]
 const IX_RENAME = [98, 63, 129, 146, 24, 170, 185, 45];
 const IX_REQUEST_SWITCH = [227, 11, 252, 67, 174, 8, 46, 204];
+const IX_ADD = [41, 249, 249, 146, 197, 111, 56, 181];
 const EVENTS = {
   "148,232,32,179,231,9,232,103": "Renamed",
   "7,223,168,139,165,147,157,170": "Switched",
@@ -217,6 +218,7 @@ export async function loadHappenings(conn, limit = 15) {
   const out = [];
   for (const s of sigs) {
     const tx = await conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0 });
+    const before = out.length;
     for (const line of tx?.meta?.logMessages ?? []) {
       if (!line.startsWith("Program data: ")) continue;
       const bytes = Uint8Array.from(atob(line.slice(14)), (c) => c.charCodeAt(0));
@@ -229,6 +231,19 @@ export async function loadHappenings(conn, limit = 15) {
       if (name === "SwitchRequested") Object.assign(ev, { user: r.key(), from: r.key(), to: r.key() });
       if (name === "SwitchAborted") Object.assign(ev, { user: r.key(), wanted: r.key(), landed: r.key() });
       out.push(ev);
+    }
+    // A whole switch in one transaction logs so much (Orca, Meteora, the token programs) that
+    // Solana can cut the log off before our "Switched" event. The add instruction itself says
+    // the switch landed, and which quote it landed in (its 6th account).
+    const switched = out.slice(before).some((e) => e.name === "Switched");
+    if (tx && !switched) {
+      const msg = tx.transaction.message;
+      const keys = msg.getAccountKeys ? msg.getAccountKeys({ accountKeysFromLookups: tx.meta.loadedAddresses }) : null;
+      for (const ix of msg.compiledInstructions ?? []) {
+        if (!keys || !keys.get(ix.programIdIndex)?.equals(programId())) continue;
+        if (!IX_ADD.every((b, k) => ix.data[k] === b)) continue;
+        out.splice(before, 0, { name: "Switched", sig: s.signature, time: s.blockTime, user: keys.get(0), quote: keys.get(ix.accountKeyIndexes[5]) });
+      }
     }
   }
   return out;
