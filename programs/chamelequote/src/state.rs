@@ -22,7 +22,7 @@ pub const SWITCH_TIMEOUT: i64 = 600;
 /// translated at the average exchange rate instead of the realised one.
 pub const MIN_REALISED_VALUE_USDC: u128 = 1_000_000;
 
-pub const MAX_FEE_SHARE_BPS: u16 = 5000;
+pub const MAX_FEE_SHARE_BPS: u16 = 10_000;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
 #[cfg_attr(not(target_os = "solana"), derive(Debug))]

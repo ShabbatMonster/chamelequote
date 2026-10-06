@@ -92,6 +92,10 @@ pub mod chamelequote {
         switch::add(ctx)
     }
 
+    pub fn claim_fees<'info>(ctx: Context<'info, ClaimFees<'info>>) -> Result<()> {
+        switch::claim_fees(ctx)
+    }
+
     pub fn abort(ctx: Context<Abort>) -> Result<()> {
         switch::abort(ctx)
     }

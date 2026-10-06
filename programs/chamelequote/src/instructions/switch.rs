@@ -380,21 +380,7 @@ pub fn pull<'info>(ctx: Context<'info, Pull<'info>>) -> Result<()> {
         wp::invoke(&wp::close_position_ix(authority, receiver, mint), &infos, &[seeds])?;
     }
 
-    if config.fee_share_bps > 0 {
-        let share = |f: u64| (f as u128 * config.fee_share_bps as u128 / 10_000) as u64;
-        let p = &ctx.accounts.pool;
-        for (fee, ours, fee_acct, mint, program) in [
-            (fees.0, &p.ours_a, &ctx.accounts.fee_a, &p.mint_a, &p.token_program_a),
-            (fees.1, &p.ours_b, &ctx.accounts.fee_b, &p.mint_b, &p.token_program_b),
-        ] {
-            let amount = share(fee);
-            if amount == 0 {
-                continue;
-            }
-            util::require_ata(fee_acct, &config.fee_recipient, mint)?;
-            util::transfer(program, ours, mint, fee_acct, &ctx.accounts.authority, amount, &[seeds])?;
-        }
-    }
+    pay_fee_share(config, &ctx.accounts.pool, &ctx.accounts.fee_a, &ctx.accounts.fee_b, &ctx.accounts.authority, fees, seeds)?;
 
     let start = util::token_amount(if index_is_a { &ours_b } else { &ours_a })?;
     let config = &mut ctx.accounts.config;
@@ -403,6 +389,93 @@ pub fn pull<'info>(ctx: Context<'info, Pull<'info>>) -> Result<()> {
     config.switch.holding = quote;
     config.switch.phase = Phase::Swapping;
     Ok(())
+}
+
+/// Sends `fee_share_bps` of collected fees (raw amounts of mint A, mint B) to the fee recipient.
+/// The rest stays in the program's accounts and becomes backing at the next lay-out.
+fn pay_fee_share<'info>(
+    config: &Config,
+    p: &PoolSides<'info>,
+    fee_a: &UncheckedAccount<'info>,
+    fee_b: &UncheckedAccount<'info>,
+    authority: &UncheckedAccount<'info>,
+    fees: (u64, u64),
+    seeds: &[&[u8]],
+) -> Result<()> {
+    if config.fee_share_bps == 0 {
+        return Ok(());
+    }
+    let share = |f: u64| (f as u128 * config.fee_share_bps as u128 / 10_000) as u64;
+    for (fee, ours, fee_acct, mint, program) in [
+        (fees.0, &p.ours_a, fee_a, &p.mint_a, &p.token_program_a),
+        (fees.1, &p.ours_b, fee_b, &p.mint_b, &p.token_program_b),
+    ] {
+        let amount = share(fee);
+        if amount == 0 {
+            continue;
+        }
+        util::require_ata(fee_acct, &config.fee_recipient, mint)?;
+        util::transfer(program, ours, mint, fee_acct, authority, amount, &[seeds])?;
+    }
+    Ok(())
+}
+
+// =============================================================================================
+// claim fees
+
+#[derive(Accounts)]
+pub struct ClaimFees<'info> {
+    pub config: Box<Account<'info, Config>>,
+
+    /// CHECK: PDA signer.
+    #[account(seeds = [AUTHORITY_SEED], bump = config.authority_bump)]
+    pub authority: UncheckedAccount<'info>,
+
+    pub pool: PoolSides<'info>,
+    pub positions: Positions<'info>,
+
+    /// CHECK: fee recipient's ATA for mint A (checked when a share is paid).
+    #[account(mut)]
+    pub fee_a: UncheckedAccount<'info>,
+    /// CHECK: fee recipient's ATA for mint B (checked when a share is paid).
+    #[account(mut)]
+    pub fee_b: UncheckedAccount<'info>,
+
+    /// CHECK: address checked.
+    #[account(address = wp::MEMO_ID)]
+    pub memo_program: UncheckedAccount<'info>,
+    /// CHECK: address checked.
+    #[account(address = wp::WHIRLPOOL_ID)]
+    pub whirlpool_program: UncheckedAccount<'info>,
+}
+
+/// Collects the trading fees the live positions have earned and pays the fee recipient its
+/// share, without touching liquidity. Anyone can call it; the keeper does so periodically.
+pub fn claim_fees<'info>(ctx: Context<'info, ClaimFees<'info>>) -> Result<()> {
+    let config = &ctx.accounts.config;
+    require!(config.switch.phase == Phase::Idle, E::WrongPhase);
+    let pool_key = ctx.accounts.pool.whirlpool.key();
+    require_keys_eq!(pool_key, config.active_pool, E::WrongPool);
+    let authority = ctx.accounts.authority.key();
+    let (_, sides) = ctx.accounts.pool.load(&authority)?;
+    let infos = ctx.accounts.to_account_infos();
+    let bump = [config.authority_bump];
+    let seeds: &[&[u8]] = &[AUTHORITY_SEED, &bump];
+    let (ours_a, ours_b) = (ctx.accounts.pool.ours_a.to_account_info(), ctx.accounts.pool.ours_b.to_account_info());
+    let mut fees = (0u64, 0u64);
+    for i in 0..2u8 {
+        let (mint, position, lower, upper) = ctx.accounts.positions.slot(&pool_key, i)?;
+        let Some(st) = wp::read_position(position)? else { continue };
+        if st.liquidity == 0 {
+            continue;
+        }
+        wp::invoke(&wp::update_fees_ix(pool_key, mint, lower, upper), &infos, &[])?;
+        let (a0, b0) = (util::token_amount(&ours_a)?, util::token_amount(&ours_b)?);
+        wp::invoke(&wp::collect_fees_ix(pool_key, authority, mint, &sides), &infos, &[seeds])?;
+        fees.0 += util::token_amount(&ours_a)? - a0;
+        fees.1 += util::token_amount(&ours_b)? - b0;
+    }
+    pay_fee_share(config, &ctx.accounts.pool, &ctx.accounts.fee_a, &ctx.accounts.fee_b, &ctx.accounts.authority, fees, seeds)
 }
 
 // =============================================================================================

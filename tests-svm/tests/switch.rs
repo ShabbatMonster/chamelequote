@@ -330,3 +330,22 @@ fn abort_refund_cannot_be_redirected() {
     assert!(err.contains("WrongTokenAccount"), "{err}");
     assert_eq!(env.balance(&thief_token), 0);
 }
+
+#[test]
+fn claim_fees_pays_the_recipient_without_touching_liquidity() {
+    let (mut env, _whale) = traded();
+    let fee_ata = chamelequote::whirlpool::ata(&env.fee_recipient.pubkey(), &env.usdc, &anchor_spl::token::spl_token::ID);
+    let pool = env.config().active_pool;
+    let (liq, price) = (env.pool(&pool).liquidity, env.pool(&pool).sqrt_price);
+    let cranker = env.funded();
+    let action = env.crank_as(&cranker.pubkey()).claim_fees().unwrap();
+    env.send(&action.ixs, &[&cranker]).unwrap();
+    // $50k bought through a 1% pool: ~$500 of fees, 10% share in this test setup.
+    let got = env.balance(&fee_ata) as f64 / 1e6;
+    assert!((40.0..=60.0).contains(&got), "fee share: ${got}");
+    assert_eq!((env.pool(&pool).liquidity, env.pool(&pool).sqrt_price), (liq, price), "liquidity untouched");
+    // Claiming again right away pays nothing new.
+    let action = env.crank_as(&cranker.pubkey()).claim_fees().unwrap();
+    env.send(&action.ixs, &[&cranker]).unwrap();
+    assert_eq!(env.balance(&fee_ata) as f64 / 1e6, got);
+}

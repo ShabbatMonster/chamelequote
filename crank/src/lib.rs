@@ -15,7 +15,8 @@ use anchor_lang::{
 };
 use chamelequote::{
     accounts, instruction,
-    instructions::{plan_positions, position_mint_address},
+    instructions::{plan_positions, position_mint_address, InitializeParams},
+    metaplex,
     math,
     state::{Config, Phase, QuoteEntry, AUTHORITY_SEED, CONFIG_SEED, ESCROW_SEED, QUOTE_SEED},
     whirlpool::{self as wp, PoolState, Sides},
@@ -271,6 +272,39 @@ impl<'a, L: Ledger> Crank<'a, L> {
         }
     }
 
+    /// Collects the live positions' trading fees and pays the fee recipient its share. Includes
+    /// creating the recipient's token accounts. None while a switch is in flight or before launch.
+    pub fn claim_fees(&self) -> Option<Action> {
+        let c = self.config();
+        if c.active_pool == Pubkey::default() || c.switch.phase != Phase::Idle {
+            return None;
+        }
+        let pool = self.pool_sides(&c.active_pool);
+        let fee = c.fee_recipient;
+        let fee_a = wp::ata(&fee, &pool.mint_a, &pool.token_program_a);
+        let fee_b = wp::ata(&fee, &pool.mint_b, &pool.token_program_b);
+        let ixs = vec![
+            create_ata_ix(&self.cranker, &fee, &pool.mint_a, &pool.token_program_a),
+            create_ata_ix(&self.cranker, &fee, &pool.mint_b, &pool.token_program_b),
+            Instruction {
+                program_id: PROGRAM_ID,
+                accounts: accounts::ClaimFees {
+                    config: config_pda(),
+                    authority: authority(),
+                    positions: self.positions(&c.active_pool, [None, None]),
+                    pool,
+                    fee_a,
+                    fee_b,
+                    memo_program: wp::MEMO_ID,
+                    whirlpool_program: wp::WHIRLPOOL_ID,
+                }
+                .to_account_metas(None),
+                data: instruction::ClaimFees {}.data(),
+            },
+        ];
+        Some(Action::new("claim fees", ixs))
+    }
+
     /// The entry whose route pool the next hop trades through (mirrors the program's rule).
     pub fn next_via(&self) -> Pubkey {
         let c = self.config();
@@ -483,5 +517,56 @@ impl<'a, L: Ledger> Crank<'a, L> {
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Admin (launch tooling)
+
+pub fn initialize_ix(admin: &Pubkey, mint: &Pubkey, params: InitializeParams) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: accounts::Initialize {
+            admin: *admin,
+            config: config_pda(),
+            authority: authority(),
+            mint: *mint,
+            supply_vault: wp::ata(&authority(), mint, &TOKEN_PROGRAM),
+            escrow: escrow(),
+            metadata: metaplex::metadata_address(mint),
+            token_metadata_program: metaplex::TOKEN_METADATA_ID,
+            token_program: TOKEN_PROGRAM,
+            associated_token_program: wp::ATA_PROGRAM_ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::Initialize { params }.data(),
+    }
+}
+
+/// `hub_route`: (hub mint, route pool), or None for the root (USDC).
+pub fn list_quote_ix(admin: &Pubkey, mint: &Pubkey, hub_route: Option<(Pubkey, Pubkey)>) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: accounts::ListQuote {
+            admin: *admin,
+            config: config_pda(),
+            quote_mint: *mint,
+            quote: quote_pda(mint),
+            hub_entry: hub_route.map(|(h, _)| quote_pda(&h)),
+            route_pool: hub_route.map(|(_, r)| r),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+        data: instruction::ListQuote {}.data(),
+    }
+}
+
+/// `index_sqrt`: sqrt(raw quote per raw index), Q64.64.
+pub fn launch_ix(admin: &Pubkey, quote: &Pubkey, index_sqrt: u128) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: accounts::Launch { admin: *admin, config: config_pda(), quote: quote_pda(quote) }.to_account_metas(None),
+        data: instruction::Launch { index_sqrt }.data(),
     }
 }

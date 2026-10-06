@@ -21,6 +21,7 @@ const IX_CLOSE_POSITION_TE: [u8; 8] = [1, 182, 135, 59, 155, 25, 99, 223];
 const IX_INCREASE_LIQUIDITY_V2: [u8; 8] = [133, 29, 89, 223, 69, 238, 176, 10];
 const IX_DECREASE_LIQUIDITY_V2: [u8; 8] = [58, 127, 188, 62, 79, 82, 196, 96];
 const IX_COLLECT_FEES_V2: [u8; 8] = [207, 117, 95, 191, 229, 180, 226, 15];
+const IX_UPDATE_FEES: [u8; 8] = [154, 230, 250, 13, 236, 209, 75, 223];
 const IX_SWAP_V2: [u8; 8] = [43, 4, 237, 11, 26, 201, 30, 98];
 const IX_INITIALIZE_POOL_V2: [u8; 8] = [207, 45, 87, 242, 27, 63, 204, 67];
 const IX_INIT_DYNAMIC_TICK_ARRAY: [u8; 8] = [41, 33, 165, 200, 120, 231, 142, 50];
@@ -287,6 +288,15 @@ pub fn collect_fees_ix(whirlpool: Pubkey, authority: Pubkey, position_mint: Pubk
         ],
         IX_COLLECT_FEES_V2,
         &[&[NO_REMAINING]],
+    )
+}
+
+/// Brings a position's owed fees up to date (needed before collecting without touching liquidity).
+pub fn update_fees_ix(whirlpool: Pubkey, position_mint: Pubkey, tick_array_lower: Pubkey, tick_array_upper: Pubkey) -> Instruction {
+    ix(
+        vec![w(whirlpool), w(position_address(&position_mint)), r(tick_array_lower), r(tick_array_upper)],
+        IX_UPDATE_FEES,
+        &[],
     )
 }
 

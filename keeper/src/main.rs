@@ -9,6 +9,12 @@
 //!   keeper run    --rpc <url> --keypair <path> [--priority-fee <micro-lamports per CU>]
 //!   keeper once   ...          one poke round + crank until idle, then exit
 //!   keeper status --rpc <url>  print the switch state and how fresh the averages are
+//!
+//! Launch tooling (signed by --keypair, which becomes the admin):
+//!   keeper init   --mint-keypair <path> --name <s> --symbol <s> --uri <url> --supply <raw> --burn <raw>
+//!                 --fee-recipient <pubkey> --fee-share-bps <n>
+//!   keeper list   --routes data/orca-routes.json [--min-tvl-curated 50000] [--min-tvl-custom 250000]
+//!   keeper launch --quote <mint> --price-num <n> --price-den <n>   (raw quote per raw token)
 
 use std::{
     thread::sleep,
@@ -21,7 +27,10 @@ use anchor_lang::{
     AccountDeserialize,
 };
 use chamelequote::{state::QuoteEntry, ID as PROGRAM_ID};
-use chamelequote_crank::{config_pda, Action, Crank, Ledger, QUOTE_ENTRY_DISCRIMINATOR};
+use chamelequote::{instructions::InitializeParams, math};
+use chamelequote_crank::{
+    config_pda, initialize_ix, launch_ix, list_quote_ix, quote_pda, Action, Crank, Ledger, QUOTE_ENTRY_DISCRIMINATOR,
+};
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::{read_keypair_file, Keypair};
@@ -38,6 +47,13 @@ const CLOCK_SYSVAR: Pubkey = anchor_lang::prelude::pubkey!("SysvarC1ock111111111
 const POKE_EVERY: Duration = Duration::from_secs(50);
 const RELIST_EVERY: Duration = Duration::from_secs(600);
 const TICK: Duration = Duration::from_secs(4);
+const CLAIM_EVERY: Duration = Duration::from_secs(900);
+
+// Mainnet defaults for `init`.
+const WHIRLPOOLS_CONFIG: &str = "2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ";
+const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const WSOL: &str = "So11111111111111111111111111111111111111112";
+const TICK_SPACING: u16 = 128;
 
 struct Rpc(RpcClient);
 
@@ -83,6 +99,23 @@ struct Opts {
     rpc: String,
     keypair: Option<String>,
     priority_fee: u64,
+    /// Everything else, by flag name (for the admin commands).
+    extra: std::collections::HashMap<String, String>,
+}
+
+impl Opts {
+    fn get(&self, k: &str) -> String {
+        self.extra.get(k).cloned().unwrap_or_else(|| panic!("--{k} is required"))
+    }
+    fn get_or(&self, k: &str, d: &str) -> String {
+        self.extra.get(k).cloned().unwrap_or_else(|| d.to_string())
+    }
+    fn pubkey(&self, k: &str) -> Pubkey {
+        self.get(k).parse().unwrap_or_else(|_| panic!("--{k} must be a public key"))
+    }
+    fn num(&self, k: &str) -> u64 {
+        self.get(k).parse().unwrap_or_else(|_| panic!("--{k} must be a number"))
+    }
 }
 
 fn log(msg: &str) {
@@ -188,14 +221,23 @@ fn status(rpc: &Rpc) {
 fn parse() -> (String, Opts) {
     let mut args = std::env::args().skip(1);
     let cmd = args.next().unwrap_or_else(|| "help".into());
-    let mut o = Opts { rpc: std::env::var("RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".into()), keypair: std::env::var("KEEPER_KEYPAIR").ok(), priority_fee: 0 };
+    let mut o = Opts {
+        rpc: std::env::var("RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".into()),
+        keypair: std::env::var("KEEPER_KEYPAIR").ok(),
+        priority_fee: 0,
+        extra: Default::default(),
+    };
     while let Some(a) = args.next() {
         let mut val = || args.next().unwrap_or_else(|| panic!("{a} needs a value"));
         match a.as_str() {
             "--rpc" => o.rpc = val(),
             "--keypair" => o.keypair = Some(val()),
             "--priority-fee" => o.priority_fee = val().parse().expect("--priority-fee takes a number"),
-            other => panic!("unknown option {other}"),
+            other if other.starts_with("--") => {
+                let v = val();
+                o.extra.insert(other[2..].to_string(), v);
+            }
+            other => panic!("unknown argument {other}"),
         }
     }
     (cmd, o)
@@ -206,24 +248,31 @@ fn main() {
     let rpc = Rpc(RpcClient::new_with_commitment(o.rpc.clone(), CommitmentConfig::confirmed()));
     match cmd.as_str() {
         "status" => return status(&rpc),
-        "run" | "once" => {}
+        "run" | "once" | "init" | "list" | "launch" => {}
         _ => {
-            println!("usage: keeper run|once|status --rpc <url> --keypair <path> [--priority-fee <micro-lamports>]");
+            println!("usage: keeper run|once|status|init|list|launch --rpc <url> --keypair <path> ... (see source header)");
             return;
         }
     }
-    let path = o.keypair.expect("--keypair (or KEEPER_KEYPAIR) is required");
+    let path = o.keypair.clone().expect("--keypair (or KEEPER_KEYPAIR) is required");
     let payer = read_keypair_file(&path).unwrap_or_else(|e| panic!("could not read keypair {path}: {e}"));
     log(&format!("keeper {} on {} (program {PROGRAM_ID})", payer.pubkey(), o.rpc));
     match rpc.0.get_balance(&payer.pubkey()) {
         Ok(b) => log(&format!("balance {:.4} SOL", b as f64 / 1e9)),
         Err(e) => log(&format!("could not read balance: {e}")),
     }
+    match cmd.as_str() {
+        "init" => return admin_init(&rpc, &payer, &o),
+        "list" => return admin_list(&rpc, &payer, &o),
+        "launch" => return admin_launch(&rpc, &payer, &o),
+        _ => {}
+    }
     if rpc.account(&config_pda()).is_none() {
         log("program is not initialized on this cluster yet; nothing to do");
         return;
     }
 
+    let mut last_claim = None::<Instant>;
     let mut quotes = rpc.quote_entries();
     let (mut last_poke, mut last_list) = (None::<Instant>, Instant::now());
     loop {
@@ -236,9 +285,98 @@ fn main() {
             last_poke = Some(Instant::now());
         }
         crank_round(&rpc, &payer, o.priority_fee);
+        if last_claim.is_none_or(|t| t.elapsed() >= CLAIM_EVERY) {
+            if let Some(a) = Crank::new(&rpc, payer.pubkey()).claim_fees() {
+                match send(&rpc, &payer, &a, o.priority_fee) {
+                    Ok(sig) => log(&format!("claimed fees: {sig}")),
+                    Err(e) => log(&format!("claim fees failed: {}", first_line(&e))),
+                }
+            }
+            last_claim = Some(Instant::now());
+        }
         if cmd == "once" {
             return;
         }
         sleep(TICK);
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Launch tooling
+
+fn send_ixs(rpc: &Rpc, payer: &Keypair, label: &'static str, ixs: Vec<Instruction>, signers: Vec<Keypair>, fee: u64) {
+    let action = Action { label, ixs, signers };
+    match send(rpc, payer, &action, fee) {
+        Ok(sig) => log(&format!("{label}: {sig}")),
+        Err(e) => {
+            log(&format!("{label} FAILED: {}", first_line(&e)));
+            std::process::exit(1);
+        }
+    }
+}
+
+fn admin_init(rpc: &Rpc, payer: &Keypair, o: &Opts) {
+    let mint_kp = read_keypair_file(o.get("mint-keypair")).expect("could not read --mint-keypair");
+    let params = InitializeParams {
+        name: o.get("name"),
+        symbol: o.get("symbol"),
+        uri: o.get("uri"),
+        supply: o.num("supply"),
+        burn_amount: o.num("burn"),
+        whirlpools_config: o.get_or("whirlpools-config", WHIRLPOOLS_CONFIG).parse().unwrap(),
+        tick_spacing: o.get_or("tick-spacing", &TICK_SPACING.to_string()).parse().unwrap(),
+        usdc: o.get_or("usdc", USDC).parse().unwrap(),
+        wsol: o.get_or("wsol", WSOL).parse().unwrap(),
+        fee_recipient: o.pubkey("fee-recipient"),
+        fee_share_bps: o.num("fee-share-bps") as u16,
+    };
+    log(&format!("initializing mint {}", mint_kp.pubkey()));
+    let ix = initialize_ix(&payer.pubkey(), &mint_kp.pubkey(), params);
+    send_ixs(rpc, payer, "initialize", vec![ix], vec![mint_kp], o.priority_fee);
+}
+
+/// Lists USDC, then WSOL (via the SOL/USDC hub pool), then every route in the file that clears
+/// the liquidity bar. Already-listed quotes are skipped, so it can be re-run.
+fn admin_list(rpc: &Rpc, payer: &Keypair, o: &Opts) {
+    let routes: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(o.get("routes")).expect("could not read --routes")).expect("bad routes json");
+    let min_curated: f64 = o.get_or("min-tvl-curated", "50000").parse().unwrap();
+    let min_custom: f64 = o.get_or("min-tvl-custom", "250000").parse().unwrap();
+    let c = Crank::new(rpc, payer.pubkey()).config();
+    let hub_pool: Pubkey = routes["hubPool"]["pool"].as_str().expect("hubPool.pool").parse().unwrap();
+
+    let mut todo: Vec<(Pubkey, Option<(Pubkey, Pubkey)>, String)> =
+        vec![(c.usdc, None, "USDC".into()), (c.wsol, Some((c.usdc, hub_pool)), "SOL".into())];
+    for r in routes["routes"].as_array().expect("routes") {
+        let mint: Pubkey = r["mint"].as_str().unwrap().parse().unwrap();
+        if mint == c.usdc || mint == c.wsol || mint == c.mint {
+            continue;
+        }
+        let tvl = r["tvlUsd"].as_f64().or_else(|| r["tvlUsd"].as_str().and_then(|s| s.parse().ok())).unwrap_or(0.0);
+        let bar = if r["category"] == "custom" { min_custom } else { min_curated };
+        if tvl < bar {
+            continue;
+        }
+        let hub = if r["hub"] == "USDC" { c.usdc } else { c.wsol };
+        let pool: Pubkey = r["pool"].as_str().unwrap().parse().unwrap();
+        todo.push((mint, Some((hub, pool)), format!("{} (${:.0}k)", r["symbol"].as_str().unwrap_or("?"), tvl / 1000.0)));
+    }
+    log(&format!("{} quotes pass the bar", todo.len()));
+    for (mint, hub_route, label) in todo {
+        if rpc.account(&quote_pda(&mint)).is_some() {
+            continue;
+        }
+        let action = Action { label: "list", ixs: vec![list_quote_ix(&payer.pubkey(), &mint, hub_route)], signers: vec![] };
+        match send(rpc, payer, &action, o.priority_fee) {
+            Ok(_) => log(&format!("listed {label}")),
+            Err(e) => log(&format!("could not list {label}: {}", first_line(&e))),
+        }
+    }
+}
+
+fn admin_launch(rpc: &Rpc, payer: &Keypair, o: &Opts) {
+    let quote = o.pubkey("quote");
+    let sqrt = math::sqrt_ratio(o.num("price-num") as u128, o.num("price-den") as u128).expect("bad price");
+    log(&format!("launching against {quote} at sqrt price {sqrt}"));
+    send_ixs(rpc, payer, "launch", vec![launch_ix(&payer.pubkey(), &quote, sqrt)], vec![], o.priority_fee);
 }
