@@ -1,0 +1,502 @@
+import { CONFIG } from "./config.js";
+import { installCursors } from "./cursors.js";
+import { initMenus, initCombo } from "./widgets.js";
+import { demoView, DEMO_WALLET } from "./demo.js";
+import { QUOTE_META } from "./quotes-meta.js";
+import * as chain from "./chain.js";
+
+const $ = (id) => document.getElementById(id);
+const DEMO = !CONFIG.MINT || location.hash === "#demo";
+
+let view = null; // what the page shows (see demo.js for the shape)
+let conn = null;
+let wallet = null; // { provider, address, balance }
+
+// ---------------------------------------------------------------------------------------------
+// Formatting
+
+const num = (n, dp = 0) => Number(n).toLocaleString("en-US", { maximumFractionDigits: dp, minimumFractionDigits: 0 });
+const sig = (n) => (n >= 1 ? num(n, 2) : Number(n).toLocaleString("en-US", { maximumSignificantDigits: 4 }));
+const usd = (n) => "$" + (n >= 1000 ? num(n) : n >= 1 ? num(n, 2) : sig(n));
+const short = (s) => (s.length > 10 ? s.slice(0, 4) + "…" + s.slice(-4) : s);
+const ago = (t) => {
+  const s = Math.max(0, Date.now() / 1000 - t);
+  if (s < 90) return "just now";
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  if (s < 129600) return `${Math.round(s / 3600)} hr ago`;
+  return `${Math.round(s / 86400)} days ago`;
+};
+const ipfsHttp = (u) => (u?.startsWith("ipfs://") ? CONFIG.IPFS_GATEWAY + u.slice(7) : u);
+
+function say(el, text, kind = "") {
+  el.textContent = text;
+  el.className = "msg" + (kind ? " " + kind : "");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Rendering
+
+let combo;
+
+function render() {
+  const v = view;
+  document.title = `${v.coin.name} ($${v.coin.symbol})`;
+  $("coin-name").textContent = v.coin.name;
+  $("coin-symbol").textContent = v.coin.symbol;
+  $("coin-image").hidden = !v.coin.image;
+  $("coin-blank").hidden = !!v.coin.image;
+  if (v.coin.image) $("coin-image").src = v.coin.image;
+  $("paired-with").textContent = v.launched ? v.active.symbol : "not launched yet";
+
+  const digits = String(Math.round(v.totalBurned)).padStart(10, "0");
+  $("burn-counter").innerHTML = [...digits].map((d) => `<span>${d}</span>`).join("");
+
+  $("marquee-text").textContent =
+    `*** Welcome to the home of ${v.coin.name} ($${v.coin.symbol})! ***   ` +
+    (v.launched ? `Now paired with ${v.active.symbol} at ${usd(v.price.usd)} a token   ***   ` : "") +
+    `${num(v.totalBurned)} tokens burned so far   ***   ` +
+    `Burn ${num(v.burnAmount)} to rename it or to change what it trades against   ***`;
+
+  if (v.launched) {
+    const qs = v.active.symbol;
+    $("st-price").textContent = `${sig(v.price.quote)} ${qs}`;
+    $("st-usd").textContent = usd(v.price.usd);
+    $("st-mcap").textContent = usd(v.price.usd * v.supply);
+    $("st-backing").textContent = `${num(v.backing.quote, 4)} ${qs} (${usd(v.backing.usd)})`;
+    $("st-floor").textContent = `${sig(v.floor.quote)} ${qs} (${usd(v.floor.usd)})`;
+  }
+  $("st-supply").textContent = `${num(v.supply)} (${num(v.inPool ?? 0)} in the pool)`;
+  $("st-counts").textContent = `${num(v.renames)} renames, ${num(v.quoteChanges)} quote changes`;
+  $("st-ca").textContent = v.coin.mint;
+
+  $("switch-cost").textContent = num(v.burnAmount);
+  $("rename-cost").textContent = num(v.burnAmount);
+  renderBalance();
+
+  const opts = v.quotes
+    .filter((q) => q.enabled && (!v.launched || q.mint !== v.active.mint))
+    .sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || a.symbol.localeCompare(b.symbol))
+    .map((q) => ({ value: q.mint, label: q.symbol, detail: q.name, group: q.group }));
+  combo.setOptions(opts, opts.some((o) => o.value === combo.value) ? combo.value : null);
+
+  renderHappenings();
+  renderLinks();
+  renderSwitch();
+  $("last-updated").textContent = `Last updated ${new Date().toLocaleTimeString()}.`;
+}
+
+const GROUP_ORDER = ["Stocks", "Pre-IPO", "Cash", "Solana", "Leveraged", "Backpack", "Collectibles", "Memes & More"];
+
+function renderBalance() {
+  $("switch-balance").textContent = wallet ? `${num(wallet.balance)} ${view.coin.symbol}` : "connect a wallet to see";
+}
+
+function renderHappenings() {
+  const rows = view.happenings ?? [];
+  $("happenings-note").textContent = view.demo ? "Sample entries. Real activity shows up here once the coin is live." : "";
+  const body = $("happenings-body");
+  body.innerHTML = "";
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="3">Nothing yet. Be the first!</td></tr>`;
+    return;
+  }
+  for (const h of rows) {
+    const tr = document.createElement("tr");
+    if (view.demo) tr.className = "example";
+    const when = document.createElement("td");
+    when.textContent = h.ago;
+    const who = document.createElement("td");
+    who.innerHTML = "<code></code>";
+    who.firstChild.textContent = h.user;
+    const what = document.createElement("td");
+    const tag = document.createElement("b");
+    tag.className = `ev-${h.name}`;
+    tag.textContent = { Renamed: "Renamed", Switched: "Switched", SwitchRequested: "Requested", SwitchAborted: "Cancelled" }[h.name] + ": ";
+    what.append(tag, h.detail);
+    if (h.sig) {
+      const a = document.createElement("a");
+      a.href = CONFIG.EXPLORER_TX + h.sig;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.textContent = " [tx]";
+      what.append(a);
+    }
+    tr.append(when, who, what);
+    body.append(tr);
+  }
+}
+
+function renderLinks() {
+  const m = view.coin.mint;
+  const set = (id, href) => {
+    const a = $(id);
+    if (view.demo) {
+      a.removeAttribute("href");
+      a.setAttribute("aria-disabled", "true");
+      a.title = "Available after launch";
+    } else a.href = href;
+  };
+  set("link-jup", `https://jup.ag/swap/${view.launched ? view.active.mint : "SOL"}-${m}`);
+  set("link-orca", `https://www.orca.so/pools/${view.pool ?? ""}`);
+  set("link-dex", `https://dexscreener.com/solana/${m}`);
+  set("link-scan", `https://solscan.io/token/${m}`);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Switch progress
+
+const STEP_DONE = { Requested: 1, Swapping: 2, Repricing: 3 };
+let watching = null; // { target } while a switch we care about is in flight
+
+function renderSwitch() {
+  const sw = view.sw;
+  const box = $("switch-progress");
+  const inFlight = sw.phase !== "Idle";
+  const done = inFlight ? STEP_DONE[sw.phase] : watching?.finished ? 5 : null;
+  box.hidden = done == null;
+  $("switch-go").disabled = inFlight || !view.launched;
+  if (done == null) return;
+  $("switch-fill").style.width = `${(done / 5) * 100}%`;
+  [...$("switch-steps").children].forEach((li, i) => {
+    li.className = i < done ? "done" : i === done ? "now" : "";
+  });
+  if (inFlight && !watching) {
+    const t = view.quotes.find((q) => q.mint === sw.target);
+    say($("switch-msg"), `A switch to ${t?.symbol ?? short(sw.target)} is in progress. One at a time, please.`);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Wallet
+
+const PROVIDERS = [
+  { name: "Phantom", get: () => window.phantom?.solana ?? (window.solana?.isPhantom ? window.solana : null) },
+  { name: "Solflare", get: () => (window.solflare?.isSolflare ? window.solflare : null) },
+  { name: "Backpack", get: () => window.backpack?.solana ?? window.backpack ?? null },
+];
+
+function renderWalletMenu() {
+  const menu = $("menu-wallet");
+  menu.innerHTML = "";
+  const item = (label, fn) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("role", "menuitem");
+    b.textContent = label;
+    b.addEventListener("click", fn);
+    menu.append(b);
+  };
+  if (wallet) {
+    item("Copy My Address", () => copy(wallet.address));
+    item("Disconnect", () => {
+      wallet.provider?.disconnect?.();
+      wallet = null;
+      $("wallet-btn").textContent = "Connect Wallet";
+      renderWalletMenu();
+      renderBalance();
+    });
+    return;
+  }
+  const found = PROVIDERS.filter((p) => DEMO || p.get());
+  if (!found.length) {
+    const p = document.createElement("p");
+    p.className = "menu-empty";
+    p.textContent = "No Solana wallet found. Install Phantom or Solflare.";
+    menu.append(p);
+    return;
+  }
+  for (const p of found) item(`${p.name}${DEMO ? " (demo)" : ""}`, () => connectWallet(p));
+}
+
+async function connectWallet(p) {
+  try {
+    if (DEMO) {
+      wallet = { provider: null, address: DEMO_WALLET.address, balance: DEMO_WALLET.balance };
+    } else {
+      const provider = p.get();
+      await provider.connect();
+      wallet = { provider, address: provider.publicKey.toBase58(), balance: 0 };
+      await refresh();
+    }
+    $("wallet-btn").textContent = short(wallet.address);
+    renderWalletMenu();
+    renderBalance();
+  } catch (e) {
+    say($("switch-msg"), `Wallet did not connect: ${e.message ?? e}`, "err");
+  }
+}
+
+async function copy(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const r = document.createRange();
+    r.selectNodeContents($("st-ca"));
+    getSelection().removeAllRanges();
+    getSelection().addRange(r);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Actions
+
+function busy(on) {
+  document.body.classList.toggle("busy", on);
+}
+
+function needWallet(msgEl) {
+  if (wallet) return true;
+  say(msgEl, "Connect a wallet first (top right).", "err");
+  return false;
+}
+
+function needTokens(msgEl) {
+  if (wallet.balance >= view.burnAmount) return true;
+  say(msgEl, `You need ${num(view.burnAmount)} ${view.coin.symbol} to do this. You have ${num(wallet.balance)}.`, "err");
+  return false;
+}
+
+async function onSwitch() {
+  const msg = $("switch-msg");
+  const target = view.quotes.find((q) => q.mint === combo.value);
+  if (!target) return say(msg, "Pick a quote token from the list first.", "err");
+  if (!needWallet(msg) || !needTokens(msg)) return;
+
+  busy(true);
+  $("switch-go").disabled = true;
+  try {
+    if (DEMO) {
+      watching = { target: target.mint };
+      say(msg, `Burning ${num(view.burnAmount)} and switching to ${target.symbol}…`);
+      for (const phase of ["Requested", "Swapping", "Repricing"]) {
+        view.sw = { phase, target: target.mint };
+        renderSwitch();
+        await new Promise((r) => setTimeout(r, 1100));
+      }
+      const before = view.active;
+      view.sw = { phase: "Idle" };
+      view.price.quote = (view.price.quote * before.usd) / target.usd;
+      view.floor.quote = (view.floor.quote * before.usd) / target.usd;
+      view.backing = { quote: view.backing.usd / target.usd, usd: view.backing.usd };
+      view.active = target;
+      view.totalBurned += view.burnAmount;
+      view.supply -= view.burnAmount;
+      view.quoteChanges += 1;
+      wallet.balance -= view.burnAmount;
+      view.happenings.unshift({ name: "Switched", user: short(wallet.address), detail: `now paired with ${target.symbol}`, ago: "just now" });
+      watching.finished = true;
+      render();
+      say(msg, `Done. ${view.coin.symbol} now trades against ${target.symbol}.`, "ok");
+    } else {
+      say(msg, "Waiting for your wallet…");
+      const ix = chain.requestSwitchIx(wallet.provider.publicKey, view.raw, new (await chain.loadWeb3()).PublicKey(target.mint));
+      const sigTx = await chain.sendIx(conn, wallet.provider, ix);
+      watching = { target: target.mint, sig: sigTx };
+      say(msg, `Burn received. Switching to ${target.symbol}; this takes about a minute.`);
+      await refresh();
+      pollSwitch();
+    }
+  } catch (e) {
+    say(msg, friendly(e), "err");
+    $("switch-go").disabled = false;
+  } finally {
+    busy(false);
+  }
+}
+
+async function pollSwitch() {
+  const msg = $("switch-msg");
+  for (let i = 0; i < 200 && watching; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    await refresh();
+    if (view.sw.phase === "Idle") {
+      const landed = view.active;
+      watching.finished = true;
+      renderSwitch();
+      if (landed.mint === watching.target) say(msg, `Done. ${view.coin.symbol} now trades against ${landed.symbol}.`, "ok");
+      else say(msg, `The switch timed out and was cancelled. Your burn was refunded; the coin landed on ${landed.symbol}.`, "err");
+      return;
+    }
+  }
+}
+
+function utf8Len(s) {
+  return new TextEncoder().encode(s).length;
+}
+
+function checkRename(name, symbol) {
+  if (!name || utf8Len(name) > 32) return "Name must be 1 to 32 characters.";
+  if (!symbol || utf8Len(symbol) > 10) return "Ticker must be 1 to 10 characters.";
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(name + symbol)) return "Name and ticker can't contain control characters.";
+  return null;
+}
+
+async function onRename(e) {
+  e.preventDefault();
+  const msg = $("rename-msg");
+  const name = $("rn-name").value.trim();
+  const symbol = $("rn-symbol").value.trim();
+  const description = $("rn-desc").value.trim();
+  const file = $("rn-image").files[0];
+  const bad = checkRename(name, symbol);
+  if (bad) return say(msg, bad, "err");
+  if (file && file.size > 2_000_000) return say(msg, "Pictures must be under 2 MB.", "err");
+  if (!needWallet(msg) || !needTokens(msg)) return;
+
+  busy(true);
+  $("rename-go").disabled = true;
+  try {
+    if (DEMO) {
+      say(msg, "Uploading picture…");
+      await new Promise((r) => setTimeout(r, 900));
+      say(msg, `Burning ${num(view.burnAmount)}…`);
+      await new Promise((r) => setTimeout(r, 900));
+      view.coin = { ...view.coin, name, symbol, image: file ? URL.createObjectURL(file) : view.coin.image };
+      view.totalBurned += view.burnAmount;
+      view.supply -= view.burnAmount;
+      view.renames += 1;
+      wallet.balance -= view.burnAmount;
+      view.happenings.unshift({ name: "Renamed", user: short(wallet.address), detail: `renamed to ${name} ($${symbol})`, ago: "just now" });
+      render();
+    } else {
+      let image = view.coin.image ?? "";
+      if (file) {
+        say(msg, "Uploading picture to IPFS…");
+        image = await chain.ipfsUpload(file, file.name);
+      }
+      say(msg, "Uploading details to IPFS…");
+      const json = new Blob([JSON.stringify({ name, symbol, description, image })], { type: "application/json" });
+      const uri = await chain.ipfsUpload(json, "metadata.json");
+      say(msg, "Waiting for your wallet…");
+      await chain.sendIx(conn, wallet.provider, chain.renameIx(wallet.provider.publicKey, name, symbol, uri));
+      await refresh();
+    }
+    say(msg, `Done. Say hello to ${name} ($${symbol}).`, "ok");
+    $("rename-form").reset();
+    updatePreview();
+  } catch (e2) {
+    say(msg, friendly(e2), "err");
+  } finally {
+    busy(false);
+    $("rename-go").disabled = false;
+  }
+}
+
+function friendly(e) {
+  const s = String(e?.message ?? e);
+  if (/reject|denied|cancel/i.test(s)) return "You cancelled it in your wallet. Nothing was burned.";
+  if (/StalePrice/.test(s)) return "Prices are still settling after a big move. Try again in a few minutes.";
+  if (/WrongPhase/.test(s)) return "Another switch is already running. Wait for it to finish.";
+  if (/insufficient/i.test(s)) return "Not enough tokens or SOL for this.";
+  return `Something went wrong: ${s.slice(0, 160)}`;
+}
+
+let previewUrl = null;
+function updatePreview() {
+  $("rn-preview-name").textContent = $("rn-name").value.trim() || "Your Name Here";
+  $("rn-preview-symbol").textContent = "$" + ($("rn-symbol").value.trim() || "TICKER");
+  const f = $("rn-image").files[0];
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = f ? URL.createObjectURL(f) : null;
+  $("rn-preview-img").hidden = !previewUrl;
+  $("rn-preview-blank").hidden = !!previewUrl;
+  if (previewUrl) $("rn-preview-img").src = previewUrl;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Live data
+
+function toView(s, happenings, image) {
+  const quoteView = (q) => {
+    const m = QUOTE_META.get(q.mint.toBase58());
+    return {
+      mint: q.mint.toBase58(),
+      symbol: m?.symbol ?? short(q.mint.toBase58()),
+      name: m?.name ?? "",
+      group: m?.group ?? "Memes & More",
+      decimals: q.decimals,
+      enabled: q.enabled,
+      usd: s.usdOf(q),
+    };
+  };
+  const symbolOf = (k) => QUOTE_META.get(k.toBase58())?.symbol ?? short(k.toBase58());
+  return {
+    demo: false,
+    raw: s,
+    coin: { mint: CONFIG.MINT, name: s.metadata.name, symbol: s.metadata.symbol, image },
+    launched: s.launched,
+    active: s.launched ? quoteView(s.active) : null,
+    pool: s.config.activePool.toBase58(),
+    price: s.price,
+    floor: s.floor,
+    backing: s.backing,
+    inPool: s.inPool,
+    supply: s.supply,
+    burnAmount: Number(s.config.burnAmount) / 1e6,
+    totalBurned: Number(s.config.totalBurned) / 1e6,
+    renames: Number(s.config.renames),
+    quoteChanges: Number(s.config.quoteChanges),
+    quotes: s.quotes.map(quoteView),
+    sw: { phase: s.config.switch.phase, target: s.config.switch.target.toBase58() },
+    happenings: happenings.map((h) => ({
+      name: h.name,
+      user: short(h.user.toBase58()),
+      ago: h.time ? ago(h.time) : "",
+      sig: h.sig,
+      detail:
+        h.name === "Renamed" ? `renamed to ${h.newName} ($${h.symbol})`
+        : h.name === "Switched" ? `now paired with ${symbolOf(h.quote)}`
+        : h.name === "SwitchRequested" ? `asked to switch ${symbolOf(h.from)} → ${symbolOf(h.to)}`
+        : `switch to ${symbolOf(h.wanted)} timed out; burn refunded, landed in ${symbolOf(h.landed)}`,
+    })),
+  };
+}
+
+let imageCache = { uri: null, image: null };
+let happeningsCache = { at: 0, rows: [] };
+
+async function refresh() {
+  if (DEMO) return render();
+  conn ??= await chain.connect();
+  const s = await chain.loadState(conn, wallet?.provider?.publicKey);
+  if (s.metadata.uri !== imageCache.uri) {
+    imageCache = { uri: s.metadata.uri, image: null };
+    try {
+      const j = await (await fetch(ipfsHttp(s.metadata.uri))).json();
+      imageCache.image = ipfsHttp(j.image) ?? null;
+    } catch {
+      /* no picture */
+    }
+  }
+  if (Date.now() - happeningsCache.at > 30_000) {
+    happeningsCache = { at: Date.now(), rows: await chain.loadHappenings(conn).catch(() => happeningsCache.rows) };
+  }
+  view = toView(s, happeningsCache.rows, imageCache.image);
+  if (wallet) wallet.balance = s.balance ?? 0;
+  render();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Boot
+
+installCursors();
+initMenus(document.querySelector(".menubar"));
+combo = initCombo($("quote-combo"), { placeholder: "Choose…" });
+renderWalletMenu();
+$("switch-go").addEventListener("click", onSwitch);
+$("rename-form").addEventListener("submit", onRename);
+for (const id of ["rn-name", "rn-symbol", "rn-image"]) $(id).addEventListener("input", updatePreview);
+$("copy-ca").addEventListener("click", () => copy(view.coin.mint));
+$("copy-ca-menu").addEventListener("click", () => copy(view.coin.mint));
+
+if (DEMO) {
+  $("demo-note").hidden = false;
+  view = demoView();
+  render();
+} else {
+  refresh().catch((e) => {
+    $("coin-name").textContent = "Could not reach Solana";
+    say($("switch-msg"), friendly(e), "err");
+  });
+  setInterval(() => refresh().catch(() => {}), 20_000);
+}

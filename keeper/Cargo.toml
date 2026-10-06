@@ -1,0 +1,19 @@
+[package]
+name = "chamelequote-keeper"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+anchor-lang = "1.2.0"
+chamelequote = { path = "../programs/chamelequote", features = ["no-entrypoint"] }
+chamelequote-crank = { path = "../crank" }
+solana-account-decoder-client-types = "4.3"
+solana-commitment-config = "3"
+solana-keypair = "3"
+solana-rpc-client = "4.3"
+solana-rpc-client-api = "4.3"
+solana-signer = "3"
+solana-transaction = "4"

@@ -1,0 +1,11 @@
+target
+node_modules
+.anchor
+.ledger
+# Program binaries of Orca Whirlpools and Metaplex, dumped from mainnet for tests.
+# Not redistributed (Orca's code is under a non-commercial licence); fetch with
+# tests-svm/fixtures/fetch.sh.
+tests-svm/fixtures/*.so
+# Never commit keypairs.
+*keypair*.json
+keeper.json

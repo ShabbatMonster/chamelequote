@@ -1,0 +1,14 @@
+[package]
+name = "chamelequote-crank"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Host-only crate shared by the keeper and the LiteSVM tests; kept out of the program workspace.
+[workspace]
+
+[dependencies]
+anchor-lang = "1.2.0"
+chamelequote = { path = "../programs/chamelequote", features = ["no-entrypoint"] }
+solana-keypair = "3"
+solana-signer = "3"

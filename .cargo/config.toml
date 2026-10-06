@@ -1,0 +1,19 @@
+# This machine has no Visual Studio linker on PATH and no Windows SDK, but
+# cargo-build-sbf's toolchain is MSVC-hosted: build scripts and proc-macros
+# must link for x86_64-pc-windows-msvc. Link them with the lld-link that ships
+# in Solana's platform-tools, against CRT + SDK libs fetched by `xwin splat`
+# (cargo install xwin; xwin --accept-license --arch x86_64 splat --output ~/.xwin).
+[target.x86_64-pc-windows-msvc]
+linker = "C:/Users/Evan/.cache/solana/v1.53/platform-tools/llvm/bin/lld-link.exe"
+
+# cargo-build-sbf sets RUSTFLAGS, which overrides target rustflags, so hand the
+# lib dirs to lld-link through LIB instead.
+[env]
+LIB = "C:/Users/Evan/.xwin/crt/lib/x86_64;C:/Users/Evan/.xwin/sdk/lib/um/x86_64;C:/Users/Evan/.xwin/sdk/lib/ucrt/x86_64"
+# Host C code (blst, ring, ...) needs a C compiler for the MSVC target and there is no cl.exe
+# here: use platform-tools clang with the xwin headers. Plain clang, not clang-cl, so blst picks
+# its GAS assembly instead of MASM .asm files. Clang's own include dir goes first so its SIMD
+# intrinsic headers win over the MSVC ones (which expect cl.exe builtins).
+CC_x86_64_pc_windows_msvc = "C:/Users/Evan/.cache/solana/v1.53/platform-tools/llvm/bin/clang.exe"
+AR_x86_64_pc_windows_msvc = "C:/Users/Evan/.cache/solana/v1.53/platform-tools/llvm/bin/llvm-ar.exe"
+CFLAGS_x86_64_pc_windows_msvc = "--target=x86_64-pc-windows-msvc -isystem C:/Users/Evan/.cache/solana/v1.53/platform-tools/llvm/lib/clang/20/include -isystem C:/Users/Evan/.xwin/crt/include -isystem C:/Users/Evan/.xwin/sdk/include/ucrt -isystem C:/Users/Evan/.xwin/sdk/include/um -isystem C:/Users/Evan/.xwin/sdk/include/shared"

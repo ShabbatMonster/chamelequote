@@ -1,0 +1,68 @@
+{
+ "config": {
+  "address": "2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1642560,
+  "data": "nRQx4NlXwf7sxs2vIpKy+9wSX9p7349DN3qXmsYJ+CLNJlKrm99E/KmxNIyI0NeLkdmu3ngpH1GCvlo2365kkh/mm9doRD90ui6/LwKaI7GKR1R798LZ7CubYjLuw+NoR9dh+omDPGYUBQEA"
+ },
+ "fee_tier_1": {
+  "address": "62dSkn5ktwY1PoKPNMArZA4bZsvyemuknWUnnQ2ATTuN",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1197120,
+  "data": "OEufTI5EvmkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czQEAZAA="
+ },
+ "fee_tier_2": {
+  "address": "BH9LXGqLhZV3hdvShYZhgQQEjPVKhHPyHwjnsxjETFRr",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1197120,
+  "data": "OEufTI5EvmkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czQIAyAA="
+ },
+ "fee_tier_4": {
+  "address": "9zfDkPMnx9ei8mZVfCsLjkBzXob7H3PuAhabmUVAiuJF",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1197120,
+  "data": "OEufTI5EvmkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czQQAkAE="
+ },
+ "fee_tier_8": {
+  "address": "GBtp54LJqqDSWonLT878KWerkJAYqYq4jasZ1UYs8wfD",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1197120,
+  "data": "OEufTI5EvmkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czQgAIAM="
+ },
+ "fee_tier_16": {
+  "address": "87u3YRwJDNR2wozMTF3umYRgny8UMZ2mHN3UBTSXm8Ho",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1197120,
+  "data": "OEufTI5EvmkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czRAAQAY="
+ },
+ "fee_tier_64": {
+  "address": "HT55NVGVTjWmWLjV7BrSMPVZ7ppU8T2xE5nCAZ6YaGad",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1197120,
+  "data": "OEufTI5EvmkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czUAAuAs="
+ },
+ "fee_tier_96": {
+  "address": "FapWifnwxWnXQggHBk5XR9bfqAo7H53Gm3ph9Rnb8UTy",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1197120,
+  "data": "OEufTI5EvmkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czWAAZBk="
+ },
+ "fee_tier_128": {
+  "address": "BGnhGXT9CCt5WYS23zg9sqsAT2MGXkq7VSwch9pML82W",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1197120,
+  "data": "OEufTI5EvmkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czYAAECc="
+ },
+ "fee_tier_256": {
+  "address": "72NKr3dFXyYWKkgF814hRrdpLjXHJ6F3DwUXxFmAYmp4",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1197120,
+  "data": "OEufTI5EvmkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czQABIE4="
+ },
+ "fee_tier_32896": {
+  "address": "zVmMsL5qGh7txhTHFgGZcFQpSsxSx6DBLJ3u113PBer",
+  "owner": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "lamports": 1197220,
+  "data": "OEufTI5EvmkT5EH4ORPKaLBjT7Al/eqohzfoQRDRJV41ezN33e4czYCAECc="
+ }
+}
