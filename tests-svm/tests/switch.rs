@@ -486,3 +486,35 @@ fn dust_backing_still_seeds_and_comes_back() {
         assert_eq!(env.config().active_quote, usdc);
     }
 }
+
+#[test]
+fn switches_into_and_out_of_a_token_2022_stock() {
+    let (mut env, whale) = traded();
+    let usd0 = env.index_usd();
+    let usdc = env.usdc;
+    // A $400 stock on token-2022 with xStock-style extensions, routed via a deep Orca pool.
+    let xt = env.create_xstock_mint(8);
+    let route = env.init_pool(&xt, &usdc, TS_ROUTE, pool_sqrt(&xt, &usdc, 4, 1));
+    let (stock, dollars) = (50_000 * 100_000_000u64, 20_000_000 * 1_000_000u64);
+    let (a, b) = if env.pool(&route).mint_a == xt { (stock, dollars) } else { (dollars, stock) };
+    env.add_lp(&route, a, b);
+    env.list_quote(xt, Some((usdc, route)));
+    env.extra_quotes.push(xt);
+    env.keep(660);
+
+    env.request(&whale, xt).unwrap();
+    env.crank().unwrap();
+    let c = env.config();
+    assert_eq!(c.active_quote, xt);
+    assert_eq!(env.program_of(&xt), anchor_spl::token_2022::ID);
+    assert_close(env.index_usd(), usd0, 0.01, "into the token-2022 stock");
+    env.buy(&whale, 10 * 100_000_000).unwrap();
+    env.sell(&whale, 1_000_000 * 1_000_000).unwrap();
+
+    env.keep(1800);
+    let usd1 = env.index_usd();
+    env.request(&whale, usdc).unwrap();
+    env.crank().unwrap();
+    assert_eq!(env.config().active_quote, usdc);
+    assert_close(env.index_usd(), usd1, 0.02, "and back");
+}

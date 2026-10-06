@@ -15,7 +15,7 @@ use anchor_lang::{
     solana_program::{instruction::Instruction, program_pack::Pack, system_instruction, system_program},
     AccountDeserialize, InstructionData, ToAccountMetas,
 };
-use anchor_spl::{associated_token::spl_associated_token_account, token::spl_token};
+use anchor_spl::{associated_token::spl_associated_token_account, token::spl_token, token_2022::spl_token_2022};
 use base64::Engine;
 use chamelequote::{
     accounts, instruction,
@@ -99,6 +99,8 @@ pub struct Env {
     pub hub_pool: Pubkey,
     pub x_pool: Pubkey,
     pub y_pool: Pubkey,
+    /// Quotes listed by a test on top of the standard four (poked like them).
+    pub extra_quotes: Vec<Pubkey>,
     /// Compute units of the last successful transaction (for budget checks).
     pub last_cu: u64,
     /// Instruction-trace entries (top level + CPIs) of the last successful transaction, counted
@@ -196,23 +198,74 @@ impl Env {
         mint.pubkey()
     }
 
+    /// The token program that owns `mint`.
+    pub fn program_of(&self, mint: &Pubkey) -> Pubkey {
+        self.svm.get_account(mint).map(|a| a.owner).unwrap_or(spl_token::ID)
+    }
+
+    /// `owner`'s associated token account for `mint`, under whichever program owns the mint.
+    pub fn ata_of(&self, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
+        wp::ata(owner, mint, &self.program_of(mint))
+    }
+
     pub fn ensure_ata(&mut self, owner: &Pubkey, mint: &Pubkey) -> Pubkey {
         let admin = self.admin.insecure_clone();
+        let program = self.program_of(mint);
         let ix = spl_associated_token_account::instruction::create_associated_token_account_idempotent(
             &admin.pubkey(),
             owner,
             mint,
-            &spl_token::ID,
+            &program,
         );
         self.send(&[ix], &[&admin]).unwrap();
-        ata(owner, mint)
+        wp::ata(owner, mint, &program)
+    }
+
+    /// A token-2022 mint set up like an xStock: a permanent delegate and a transfer-hook
+    /// authority (no hook program), which makes Orca and Meteora want a token badge for it. Both
+    /// badges are written straight into the ledger (only their admins can create them).
+    pub fn create_xstock_mint(&mut self, decimals: u8) -> Pubkey {
+        use spl_token_2022::extension::ExtensionType;
+        let mint = Keypair::new();
+        let admin = self.admin.insecure_clone();
+        let t22 = spl_token_2022::ID;
+        let len = ExtensionType::try_calculate_account_len::<spl_token_2022::state::Mint>(&[
+            ExtensionType::PermanentDelegate,
+            ExtensionType::TransferHook,
+        ])
+        .unwrap();
+        let rent = self.svm.minimum_balance_for_rent_exemption(len);
+        let ixs = [
+            system_instruction::create_account(&admin.pubkey(), &mint.pubkey(), rent, len as u64, &t22),
+            spl_token_2022::instruction::initialize_permanent_delegate(&t22, &mint.pubkey(), &admin.pubkey()).unwrap(),
+            spl_token_2022::extension::transfer_hook::instruction::initialize(&t22, &mint.pubkey(), Some(admin.pubkey()), None).unwrap(),
+            spl_token_2022::instruction::initialize_mint2(&t22, &mint.pubkey(), &admin.pubkey(), None, decimals).unwrap(),
+        ];
+        self.send(&ixs, &[&admin, &mint]).unwrap();
+        let m = mint.pubkey();
+        const BADGE_DISC: [u8; 8] = [116, 219, 204, 229, 249, 116, 255, 150];
+        let orca_badge = wp::token_badge_address(&WP_CONFIG, &m);
+        let mut data = BADGE_DISC.to_vec();
+        data.extend(WP_CONFIG.to_bytes());
+        data.extend(m.to_bytes());
+        data.extend([0u8; 128]);
+        self.svm
+            .set_account(orca_badge, Account { lamports: 2_282_880, data, owner: wp::WHIRLPOOL_ID, executable: false, rent_epoch: 0 })
+            .unwrap();
+        let mut data = BADGE_DISC.to_vec();
+        data.extend(m.to_bytes());
+        data.extend([0u8; 128]);
+        self.svm
+            .set_account(damm::token_badge_address(&m), Account { lamports: 2_060_160, data, owner: damm::DAMM_ID, executable: false, rent_epoch: 0 })
+            .unwrap();
+        m
     }
 
     /// Mints test tokens (any mint but ours, whose authority is revoked).
     pub fn mint_to(&mut self, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Pubkey {
         let to = self.ensure_ata(owner, mint);
         let admin = self.admin.insecure_clone();
-        let ix = spl_token::instruction::mint_to(&spl_token::ID, mint, &to, &admin.pubkey(), &[], amount).unwrap();
+        let ix = spl_token_2022::instruction::mint_to(&self.program_of(mint), mint, &to, &admin.pubkey(), &[], amount).unwrap();
         self.send(&[ix], &[&admin]).unwrap();
         to
     }
@@ -247,10 +300,10 @@ impl Env {
         Sides {
             mint_a: p.mint_a,
             mint_b: p.mint_b,
-            program_a: spl_token::ID,
-            program_b: spl_token::ID,
-            owner_a: ata(owner, &p.mint_a),
-            owner_b: ata(owner, &p.mint_b),
+            program_a: self.program_of(&p.mint_a),
+            program_b: self.program_of(&p.mint_b),
+            owner_a: self.ata_of(owner, &p.mint_a),
+            owner_b: self.ata_of(owner, &p.mint_b),
             vault_a: p.vault_a,
             vault_b: p.vault_b,
         }
@@ -261,7 +314,8 @@ impl Env {
         let (a, b) = if m1.to_bytes() < m2.to_bytes() { (*m1, *m2) } else { (*m2, *m1) };
         let (va, vb) = (Keypair::new(), Keypair::new());
         let admin = self.admin.insecure_clone();
-        let ix = wp::initialize_pool_ix(WP_CONFIG, a, b, spl_token::ID, spl_token::ID, admin.pubkey(), va.pubkey(), vb.pubkey(), tick_spacing, sqrt);
+        let (pa, pb) = (self.program_of(&a), self.program_of(&b));
+        let ix = wp::initialize_pool_ix(WP_CONFIG, a, b, pa, pb, admin.pubkey(), va.pubkey(), vb.pubkey(), tick_spacing, sqrt);
         self.send(&[ix], &[&admin, &va, &vb]).unwrap();
         wp::whirlpool_address(&WP_CONFIG, &a, &b, tick_spacing)
     }
@@ -330,10 +384,10 @@ impl Env {
             pool: *pool,
             mint_a: p.mint_a,
             mint_b: p.mint_b,
-            program_a: spl_token::ID,
-            program_b: spl_token::ID,
-            ours_a: ata(&user.pubkey(), &p.mint_a),
-            ours_b: ata(&user.pubkey(), &p.mint_b),
+            program_a: self.program_of(&p.mint_a),
+            program_b: self.program_of(&p.mint_b),
+            ours_a: self.ata_of(&user.pubkey(), &p.mint_a),
+            ours_b: self.ata_of(&user.pubkey(), &p.mint_b),
             vault_a: p.vault_a,
             vault_b: p.vault_b,
         };
@@ -442,6 +496,7 @@ impl Env {
             hub_pool: Pubkey::default(),
             x_pool: Pubkey::default(),
             y_pool: Pubkey::default(),
+            extra_quotes: vec![],
             last_cu: 0,
             last_trace: 0,
             crank_cu: vec![],
@@ -684,7 +739,9 @@ impl Env {
 
     /// Keeper pokes for every listed quote.
     pub fn poke_all(&mut self) {
-        let entries: Vec<QuoteEntry> = [self.usdc, self.wsol, self.x, self.y].iter().map(|m| self.quote(m)).collect();
+        let mut mints = vec![self.usdc, self.wsol, self.x, self.y];
+        mints.extend(self.extra_quotes.iter().copied());
+        let entries: Vec<QuoteEntry> = mints.iter().map(|m| self.quote(m)).collect();
         let admin = self.admin.insecure_clone();
         let actions = self.crank_as(&admin.pubkey()).poke_quotes(&entries);
         for a in actions {

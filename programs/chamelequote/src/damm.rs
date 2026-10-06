@@ -72,6 +72,11 @@ pub fn event_authority() -> Pubkey {
     pda(&[b"__event_authority"])
 }
 
+/// Meteora's allowance for a token-2022 mint whose extensions aren't permissionless (xStocks).
+pub fn token_badge_address(mint: &Pubkey) -> Pubkey {
+    pda(&[b"token_badge", mint.as_ref()])
+}
+
 // ---------------------------------------------------------------------------------------------
 // Account readers (fixed offsets, discriminator included)
 
@@ -247,11 +252,12 @@ pub struct Sides {
 }
 
 /// Creates the pool at `sqrt_price` over [sqrt_min, MAX] with `liquidity` from `owner` (who also
-/// pays and receives the position NFT `nft_mint`): 1% fee, collected in token B only.
+/// pays and receives the position NFT `nft_mint`): 1% fee, collected in token B only. Both
+/// mints' token badges ride along; Meteora only reads the one a token-2022 mint needs.
 pub fn create_pool_ix(owner: Pubkey, nft_mint: Pubkey, s: &Sides, sqrt_min: u128, sqrt_price: u128, liquidity: u128) -> Instruction {
     let mut fee = [0u8; 27]; // BorshFeeTimeScheduler: flat cliff fee, no periods, linear mode
     fee[..8].copy_from_slice(&FEE_NUMERATOR.to_le_bytes());
-    ix(
+    let mut out = ix(
         vec![
             r(owner),
             ws(nft_mint),
@@ -286,7 +292,10 @@ pub fn create_pool_ix(owner: Pubkey, nft_mint: Pubkey, s: &Sides, sqrt_min: u128
             &[1], // collect_fee_mode: OnlyB
             &[0], // activation_point: None (now)
         ],
-    )
+    );
+    out.accounts.push(r(token_badge_address(&s.mint_a)));
+    out.accounts.push(r(token_badge_address(&s.mint_b)));
+    out
 }
 
 pub fn create_position_ix(owner: Pubkey, nft_mint: Pubkey, pool: Pubkey) -> Instruction {

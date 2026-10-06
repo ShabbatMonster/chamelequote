@@ -854,6 +854,7 @@ pub struct Add<'info> {
     pub mint: UncheckedAccount<'info>,
 
     pub programs: Programs<'info>,
+    // remaining_accounts: Meteora's token badges for our mint and the quote (new pools only).
 }
 
 /// Lays the backing and every index token into the target pool. A new pool is created at the
@@ -890,7 +891,8 @@ pub fn add<'info>(ctx: Context<'info, Add<'info>>) -> Result<()> {
                 need += Slot::rent()?;
             }
             fund_authority(&ctx.accounts.funder, &ctx.accounts.authority, &ctx.accounts.programs.system_program, need)?;
-            let infos = ctx.accounts.to_account_infos();
+            let mut infos = ctx.accounts.to_account_infos();
+            infos.extend_from_slice(ctx.remaining_accounts);
             let nft = ctx.accounts.position.nft_mint.key();
             require!(ctx.accounts.position.check(&pool_key, MAIN_SLOT)?.is_none(), E::BadPosition);
             let (idx, mb) = Slot::mint_seeds(&pool_key, MAIN_SLOT);

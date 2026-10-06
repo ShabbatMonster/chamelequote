@@ -509,9 +509,7 @@ impl<'a, L: Ledger> Crank<'a, L> {
     pub fn add_ix(&self) -> Instruction {
         let c = self.config();
         let pool = expected_pool(&c, &c.switch.target);
-        Instruction {
-            program_id: PROGRAM_ID,
-            accounts: accounts::Add {
+        let mut metas = accounts::Add {
                 funder: self.cranker,
                 config: config_pda(),
                 authority: authority(),
@@ -522,9 +520,12 @@ impl<'a, L: Ledger> Crank<'a, L> {
                 mint: c.mint,
                 programs: Self::programs(),
             }
-            .to_account_metas(None),
-            data: instruction::Add {}.data(),
+            .to_account_metas(None);
+        // Token badges for a new pool (Meteora reads the one a token-2022 quote needs).
+        for m in [c.mint, c.switch.target] {
+            metas.push(AccountMeta::new_readonly(damm::token_badge_address(&m), false));
         }
+        Instruction { program_id: PROGRAM_ID, accounts: metas, data: instruction::Add {}.data() }
     }
 
     /// Whether `seed` can fund a sentinel from the program's balances in the target pool as it is
