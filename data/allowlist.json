@@ -1,0 +1,413 @@
+{
+ "note": "Quotes the coin may switch to: Backpack tokens, wrapped majors, SOL, USDC, USDT. `keeper allow` enables exactly these (those with a liquid enough Orca route) and disables every other listed quote.",
+ "quotes": [
+  {
+   "mint": "MUxEsUKSMACyw5fZf68wxf5FLnZVhtU9CwH8uNNGay1",
+   "symbol": "MU"
+  },
+  {
+   "mint": "BoTx8y9ynfdxf5ZjWtCoBVkff52qKA82ysaLU8ZM6d8T",
+   "symbol": "ROBOSTRATEGY"
+  },
+  {
+   "mint": "SKHYhSjuRWHgikq8eRKbtBbpABgJSkd7ytQV14i9EQ3",
+   "symbol": "SKHY"
+  },
+  {
+   "mint": "SNDKbwMUQvZhnLnxLduradgLHG5KrPuKwpnrkkGRhfH",
+   "symbol": "SNDK"
+  },
+  {
+   "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "symbol": "USDC"
+  },
+  {
+   "mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+   "symbol": "USDT"
+  },
+  {
+   "mint": "DRAMjSWR7HRfJKjRkvQWYL2bcaejaVhuxEcjf4pAY4Cw",
+   "symbol": "DRAM"
+  },
+  {
+   "mint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
+   "symbol": "cbBTC"
+  },
+  {
+   "mint": "So11111111111111111111111111111111111111112",
+   "symbol": "SOL"
+  },
+  {
+   "mint": "CtzPWv73Sn1dMGVU3ZtLv9yWSyUAanBni19YWDaznnkn",
+   "symbol": "xBTC"
+  },
+  {
+   "mint": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+   "symbol": "WBTC"
+  },
+  {
+   "mint": "9gP2kCy3wA1ctvYWQk75guqXuHfrEomqydHLtcTCqiLa",
+   "symbol": "WBNB"
+  },
+  {
+   "mint": "6UpQcMAb5xMzxc7ZfPaVMgx3KqsvKZdT5U718BzD5We2",
+   "symbol": "wXRP"
+  },
+  {
+   "mint": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
+   "symbol": "TTWO"
+  },
+  {
+   "mint": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+   "symbol": "WETH"
+  },
+  {
+   "mint": "NBiSF3UaVUFtRzHwAfxyHsBCAZWGEKnMpewAE4oh7BG",
+   "symbol": "NBIS"
+  },
+  {
+   "mint": "SiLVFMgD3eD2rgK628NbTBq9MnuJF5FW2CRaVyTB35L",
+   "symbol": "SILVER"
+  },
+  {
+   "mint": "5XZw2LKTyrfvfiskJ78AMpackRjPcyCif1WhUsPDuVqQ",
+   "symbol": "WBTC"
+  },
+  {
+   "mint": "MRNAzXzhNcaEXJPibHEn8cd4vyekCDiivTyEwswLUCT",
+   "symbol": "MRNA"
+  },
+  {
+   "mint": "LLYuwZ33keFihgwoxXsBawy31AiRFLFSva32TYq5TvD",
+   "symbol": "LLY"
+  },
+  {
+   "mint": "MRVLSjkR2ceUBukujaD3xCyHP1H3B2SzpsNTZF546jo",
+   "symbol": "MRVL"
+  },
+  {
+   "mint": "5eyib4qghYGHNh7VvxSFGYLFJSanjq9hug9fR52kksnm",
+   "symbol": "PSG"
+  },
+  {
+   "mint": "poNSfquKq512ApeYjVghwViSun4x1MhCqHVH2Paq4jN",
+   "symbol": "PONS"
+  },
+  {
+   "mint": "GPRR2u6NS5yBQHWGauoJ9HXgjrTH8dDsrBfTV5zAYvDH",
+   "symbol": "GPRO"
+  },
+  {
+   "mint": "AMC1qwR9KhiyrQBRPrxnfo4JfMeMZqEBvt5tgTytNNoc",
+   "symbol": "AMC"
+  },
+  {
+   "mint": "taoC6xyv2v8tDLcev4uaGUgV4vdQsWJrGft2kcBRrBY",
+   "symbol": "TAO"
+  },
+  {
+   "mint": "ARBzQTYDCW2KnVEjs1Mc81LekB1ibVFZKbSVmorkoT9d",
+   "symbol": "ARB"
+  },
+  {
+   "mint": "DoGEV7LASBkQbibMc5k5vKnTZoMg423GpJ5QtJEGfm7R",
+   "symbol": "DOGE"
+  },
+  {
+   "mint": "EicWvteVi2fWepEzS3FYWsnuPoP6caZfjnKqNvydLjCH",
+   "symbol": "LIT"
+  },
+  {
+   "mint": "NKEda5nHhNGgjrE9nDdMvaEmkmJ96qqxzBVZEcKmjSg",
+   "symbol": "NIKE"
+  },
+  {
+   "mint": "PEAQjk7SRS6rXHVFFmpRr7zrC4g5ZuEebpwTxvaLr3b",
+   "symbol": "PEAQ"
+  },
+  {
+   "mint": "SPHRp8cZaSQBTp1KMNP4V1X821SXhXWt4Q2yLdyHzju",
+   "symbol": "SPHR"
+  },
+  {
+   "mint": "HTZsLG4zqaNvWMwXSLHH3GG5KyJpKwpBRsKVdMG6hvzP",
+   "symbol": "HTZ"
+  },
+  {
+   "mint": "RDDTGbhHwVXfyCvQMXzzowKjf5qrYBZAnehoXW83ooh",
+   "symbol": "RDDT"
+  },
+  {
+   "mint": "CZEB3WNZuF2Yz1z2H81RcCk8T7fsw82KB33zqamASVsg",
+   "symbol": "COST"
+  },
+  {
+   "mint": "DELL2aRKQz7DMq5DrKLtkn47ZCnbxXPZXrSGbkmd13wy",
+   "symbol": "DELL"
+  },
+  {
+   "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
+   "symbol": "DJT"
+  },
+  {
+   "mint": "BMKdM4yUxX12moFqVk195k7coMbaybd4RUKCUdm7D1Sk",
+   "symbol": "IBM"
+  },
+  {
+   "mint": "LMT3i1BHgixFqPUgcyteJhnEz2dpy9i3cYy4pi9BoeV",
+   "symbol": "LMT"
+  },
+  {
+   "mint": "QUBTAD8C9bMU9LvmMNgKPhrmBGbHvxpu6vfWQtThxxw",
+   "symbol": "QUBT"
+  },
+  {
+   "mint": "RBLXDGRD64AtRamHMFVcjqne3Ar7NLWtFtYNtsrf1cE",
+   "symbol": "RBLX"
+  },
+  {
+   "mint": "HiMSSzzwkZkrXJ4PGVJRdtfLaANeAztjjcgk5Dxe7Lwx",
+   "symbol": "HIMS"
+  },
+  {
+   "mint": "LULUmT9VMttkfAJE236LXJcYJ2tTP7nunrSWR5G1BdS",
+   "symbol": "LULU"
+  },
+  {
+   "mint": "PFER6ENqP8r8NF3CqVt4mFowxsin3V5MLidBNQFCC3x",
+   "symbol": "PFIZER"
+  },
+  {
+   "mint": "RcZmt84VMJv9bDhKqmw1uWDahYrUT468VwAChTnfD8p",
+   "symbol": "RIVN"
+  },
+  {
+   "mint": "SH55hfaipFAbwT42nQYhRoM5o5t61QpkmJ6p62vXB3m",
+   "symbol": "SHOP"
+  },
+  {
+   "mint": "SNAPcESrvnH8yUdgeMF6xm1hym9b6hW6s8YeqeHdZFz",
+   "symbol": "SNAP"
+  },
+  {
+   "mint": "UPSqUeMHcWbkdg784XuBUEF9DtySSnW9ur5LAVdcuB9",
+   "symbol": "UPS"
+  },
+  {
+   "mint": "PENGTDQeQSXEjKcYw3CTQi9qznxcTHXAA7LMfUNrxLV",
+   "symbol": "PENG"
+  },
+  {
+   "mint": "BArimz1PcKZr8PcPh3tcZ2dg4S7FJLk3cw6R5F8GsHKg",
+   "symbol": "BOEING"
+  },
+  {
+   "mint": "AMBAHqGPjjtJaHPPSuvPu2mPCJdkGZpmhHQa5pkXbxrM",
+   "symbol": "AMBA"
+  },
+  {
+   "mint": "BULL151gUXcFV5wXEUqu9Am2L7Qt4bTJRLRuAUjkcspC",
+   "symbol": "WEBULL"
+  },
+  {
+   "mint": "JNJg1znKdF712Phe7L7z52AATAvEjEytBdN2w8Lnh1Y",
+   "symbol": "JNJ"
+  },
+  {
+   "mint": "BABANGA4JE7Kkam4nTrALAwAVgsNJUuFJnnkF7S16BZp",
+   "symbol": "BABA"
+  },
+  {
+   "mint": "GRNDYDpqwpCm6jVxpbh4xT5AM4r3p391qYsKTHqgaET2",
+   "symbol": "GRND"
+  },
+  {
+   "mint": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
+   "symbol": "MGM"
+  },
+  {
+   "mint": "DNUTsCvKbKwu2RM72cUuW3TD9YpzArzACcqYQssjPLSk",
+   "symbol": "DNUT"
+  },
+  {
+   "mint": "WENAZ2WyPbmgvUcKfQ8hyMDfBQP9bZ65hsZ5KTFrRGZ",
+   "symbol": "WEN"
+  },
+  {
+   "mint": "DKNGQFNGQmoBdXSRGKJ8tTu7uPDasw5JDcfMmWniNfow",
+   "symbol": "DKNG"
+  },
+  {
+   "mint": "FLWSojG1gB5VStYR3Sb4nQFRt43UBYkqih1j2CpVLqgd",
+   "symbol": "FLWS"
+  },
+  {
+   "mint": "LinkhB3afbBKb2EQQu7s7umdZceV3wcvAUJhQAfQ23L",
+   "symbol": "LINK"
+  },
+  {
+   "mint": "SCHHJ3jRdSjeFEVAaLrnYdx3Brphn92Ys7z1qkiCtPX",
+   "symbol": "SCHH"
+  },
+  {
+   "mint": "PTNzAfFAB4LvoUQEUUGrFMyUoRLExMYjH6CcfyQfsVP",
+   "symbol": "PTN"
+  },
+  {
+   "mint": "FLYRq3en8r2Z69gN3KyAnDrvnitEJNkwPYY7favinHeD",
+   "symbol": "FLY"
+  },
+  {
+   "mint": "BRVaZKg6J9iF2BEsdpsxJ9NyvN9PPxPZuoQUX2v8qqkk",
+   "symbol": "BROS"
+  },
+  {
+   "mint": "AMD8XwJXgQ9WV45Wyj9yFLejxzf2J6VM1PJY8bJEjeES",
+   "symbol": "AMD"
+  },
+  {
+   "mint": "chipCAT7vi5CZtbZsn9z7iMPXvFwyAnKz3QFu8XVuHm",
+   "symbol": "CHIP"
+  },
+  {
+   "mint": "FWDtiB5fXHdVAewPqvHPL2dh4aBC1C6GacQbePoQXKjz",
+   "symbol": "FWDI"
+  },
+  {
+   "mint": "LUV9GB51PNZNRyzzyYK3rtqFfvDvWtRiXZ34wVq2HrX",
+   "symbol": "LUV"
+  },
+  {
+   "mint": "1NJMqVM4PadjuzYmeB7zV7q7DV8oB3ExaQCd9x6KsLz",
+   "symbol": "INJ"
+  },
+  {
+   "mint": "WULFeyfrj1VJKD9HhRTcW8R4g5HefUA11HDEdBv2WxD",
+   "symbol": "WULF"
+  },
+  {
+   "mint": "RUMsPfFZFnN1ZmGANwP7FNMJMjKH4m9RiMePrtVtLe7",
+   "symbol": "RUM"
+  },
+  {
+   "mint": "USNv3NkKA27Dh4nsHJDPhW4VoEcTQmjoZyJt2dqdwFu",
+   "symbol": "USO"
+  },
+  {
+   "mint": "CYPHuMmCL1GxJWa2tsPhLKykC7GrHJTCHwbXD4g5uawK",
+   "symbol": "CYPH"
+  },
+  {
+   "mint": "PEPEqnuuCDbBC89p1u9vpnP1KQ2oj1xTcQBsjt9X55m",
+   "symbol": "PEPE"
+  },
+  {
+   "mint": "BBosJLw8ZzoATiEyywiifx7AgmrD2Cm3XjFWbhbRhChy",
+   "symbol": "BB"
+  },
+  {
+   "mint": "avaxGHCq3T7hoxd73oY2KY9hJSTaeMibXvHy5KNzh5D",
+   "symbol": "AVAX"
+  },
+  {
+   "mint": "URARfsinxCRw4JpvQhuT4CxavdZXZEMjv9ZwWmWpwag",
+   "symbol": "URA"
+  },
+  {
+   "mint": "CzLTZppPdZtTjyq3WGpHLstoc3GLhu7zH5Zg6xUa6Gv5",
+   "symbol": "COPX"
+  },
+  {
+   "mint": "NQ5hSuXQZrbnrwcDVk2qN73njjd3E3v3badYHnj5thF",
+   "symbol": "IONQ"
+  },
+  {
+   "mint": "C1MHyoTJpRTeS9AQCyspNVu2EWAYCZwmJ1jNkEArFP1f",
+   "symbol": "APE"
+  },
+  {
+   "mint": "ARMbSB1MBRQrY6PNMao1HdQ431VafC6JRJCsGZ2Yv3iJ",
+   "symbol": "ARM"
+  },
+  {
+   "mint": "CRWVJeR2yEZuDUKYfGuKCHvLz8ywn4LGvovHfy5WiFmi",
+   "symbol": "CRWV"
+  },
+  {
+   "mint": "72QvBVwpxqmheEPfaCwWSWqEFsUy3rhWt6JhQBMNTwD1",
+   "symbol": "ENA"
+  },
+  {
+   "mint": "4Zp52aF4hZi9fzH19xpbWKYKQvgLyCN67KFbrQDqeTKh",
+   "symbol": "ZAMA"
+  },
+  {
+   "mint": "RENzhrJQgmAnfcLhU1U5XwAMc6TC15UA6jCbPBaasnj",
+   "symbol": "IREN"
+  },
+  {
+   "mint": "SQQQAa3gUxgnqcEsdjPA4RQNQBgB97TnG2hJhk2WaGE",
+   "symbol": "SQQQ"
+  },
+  {
+   "mint": "cbLTC4T5NpzSUtQ7ekgEMZGaUPVJY1ko6BUikqa4gGf",
+   "symbol": "CBLTC"
+  },
+  {
+   "mint": "EWY4owSJYMpwN33qGDu5gGxpkQkpMJu8ZUsQJaNZG5dv",
+   "symbol": "EWY"
+  },
+  {
+   "mint": "4qQeZ5LwSz6HuupUu8jCtgXyW1mYQcNbFAW1sWZp89HL",
+   "symbol": "CAKE"
+  },
+  {
+   "mint": "N7Q5fYX7YRnDQksfdBKnoUb3awm92n7QNAD35X3Rq1X",
+   "symbol": "NOK"
+  },
+  {
+   "mint": "cbADAmv9issuPfhFwyQG3xac4DGPd1LDSt1oz7vwJsg",
+   "symbol": "CBADA"
+  },
+  {
+   "mint": "RKLBnAXGqv31iZomqsuAWkQm1aqC7JwwvbCfzGdqAhz",
+   "symbol": "RKLB"
+  },
+  {
+   "mint": "NFLX7qV57zuVxCoHy3s1jiGZyALraLNwttbxdvmYJLJ",
+   "symbol": "NFLX"
+  },
+  {
+   "mint": "BEBVfXZ8uCxRBuunEbW9wcq9r7W9ySNo14oJBJkDgpZx",
+   "symbol": "BE"
+  },
+  {
+   "mint": "qntUzPUsJ51abNP7VYNxkmsQ4RnvEZAhavUxsCxpxH4",
+   "symbol": "QNT"
+  },
+  {
+   "mint": "ondohH8Vssxiqcy5u6Efi4AYN17KZrzQtv2a91dnrgW",
+   "symbol": "ONDO"
+  },
+  {
+   "mint": "PUSAG1stksTcAoK9MjinEHUwAYRJsbovywYCk37m6hy",
+   "symbol": "PUSA"
+  },
+  {
+   "mint": "BLKKYfF41c6xRPrtX1rdYbxLE1xxEdZUnxQsB5hcZ8Nf",
+   "symbol": "BLK"
+  },
+  {
+   "mint": "shib5gSoVKPjwkXrxRk7SbQFzb2R9rQB3TgQWYX4RwW",
+   "symbol": "SHIB"
+  },
+  {
+   "mint": "EWZzCki1igp2y73UyUM4RCG4QUVMQAtnrQUVNaDHzDxJ",
+   "symbol": "EWZ"
+  },
+  {
+   "mint": "CBRSFBbQPpp77NpMcwbTN6fhBHmZM94oFLJvruytw4Fi",
+   "symbol": "CBRS"
+  }
+ ]
+}

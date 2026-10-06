@@ -570,3 +570,11 @@ pub fn launch_ix(admin: &Pubkey, quote: &Pubkey, index_sqrt: u128) -> Instructio
         data: instruction::Launch { index_sqrt }.data(),
     }
 }
+
+pub fn set_quote_enabled_ix(admin: &Pubkey, mint: &Pubkey, enabled: bool) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: accounts::AdminQuote { admin: *admin, config: config_pda(), quote: quote_pda(mint) }.to_account_metas(None),
+        data: instruction::SetQuoteEnabled { enabled }.data(),
+    }
+}

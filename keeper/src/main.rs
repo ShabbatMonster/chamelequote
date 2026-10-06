@@ -16,6 +16,8 @@
 //!   keeper list   --routes data/orca-routes.json [--min-tvl-curated 50000] [--min-tvl-custom 250000]
 //!                 [--out docs/quotes.json]   (the listed mints, for the website)
 //!   keeper launch --quote <mint> --price-num <n> --price-den <n>   (raw quote per raw token)
+//!   keeper allow  --allowlist data/allowlist.json --routes data/orca-routes.json [--min-tvl 10000]
+//!                 [--out docs/quotes.json]   enable exactly the allowlist (listing what's missing)
 
 use std::{
     thread::sleep,
@@ -30,7 +32,8 @@ use anchor_lang::{
 use chamelequote::{state::QuoteEntry, ID as PROGRAM_ID};
 use chamelequote::{instructions::InitializeParams, math};
 use chamelequote_crank::{
-    config_pda, initialize_ix, launch_ix, list_quote_ix, quote_pda, Action, Crank, Ledger, QUOTE_ENTRY_DISCRIMINATOR,
+    config_pda, initialize_ix, launch_ix, list_quote_ix, quote_pda, set_quote_enabled_ix, Action, Crank, Ledger,
+    QUOTE_ENTRY_DISCRIMINATOR,
 };
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
@@ -156,7 +159,11 @@ fn send(rpc: &Rpc, payer: &Keypair, action: &Action, priority_fee: u64) -> Resul
 /// Pokes every listed quote and the coin's pool.
 fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
     let crank = Crank::new(rpc, payer.pubkey());
-    let live: Vec<&QuoteEntry> = quotes.iter().filter(|q| !q.is_root()).collect();
+    let c = crank.config();
+    let needed = |q: &QuoteEntry| {
+        q.enabled || q.mint == c.active_quote || q.mint == c.wsol || q.mint == c.switch.holding || q.mint == c.switch.target
+    };
+    let live: Vec<&QuoteEntry> = quotes.iter().filter(|q| !q.is_root() && needed(q)).collect();
     let mut actions: Vec<(Action, Vec<&QuoteEntry>)> = live
         .chunks(12)
         .map(|chunk| {
@@ -192,7 +199,7 @@ fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
         }
     }
     if failed > 0 || ok > 0 {
-        log(&format!("poked {} quotes + pool ({ok} tx ok, {failed} failed)", quotes.iter().filter(|q| !q.is_root()).count()));
+        log(&format!("poked {} quotes + pool ({ok} tx ok, {failed} failed)", live.len()));
     }
 }
 
@@ -289,7 +296,7 @@ fn main() {
     let rpc = Rpc(RpcClient::new_with_commitment(o.rpc.clone(), CommitmentConfig::confirmed()));
     match cmd.as_str() {
         "status" => return status(&rpc),
-        "run" | "once" | "init" | "list" | "launch" => {}
+        "run" | "once" | "init" | "list" | "launch" | "allow" => {}
         _ => {
             println!("usage: keeper run|once|status|init|list|launch --rpc <url> --keypair <path> ... (see source header)");
             return;
@@ -307,6 +314,7 @@ fn main() {
         "init" => return admin_init(&rpc, &payer, &o),
         "list" => return admin_list(&rpc, &payer, &o),
         "launch" => return admin_launch(&rpc, &payer, &o),
+        "allow" => return admin_allow(&rpc, &payer, &o),
         _ => {}
     }
     if rpc.account(&config_pda()).is_none() {
@@ -414,13 +422,80 @@ fn admin_list(rpc: &Rpc, payer: &Keypair, o: &Opts) {
             Err(e) => log(&format!("could not list {label}: {}", first_line(&e))),
         }
     }
-    // The website can't list program accounts through free RPCs, so it reads this file instead.
+    write_quotes_file(rpc, o);
+}
+
+/// The website can't list program accounts through free RPCs, so it reads this file instead.
+/// It holds every listed mint (disabled ones too: the active quote may be disabled).
+fn write_quotes_file(rpc: &Rpc, o: &Opts) {
     if let Some(out) = o.extra.get("out") {
         let mut mints: Vec<String> = rpc.quote_entries().iter().map(|q| q.mint.to_string()).collect();
         mints.sort();
         std::fs::write(out, serde_json::to_string_pretty(&serde_json::json!({ "quotes": mints })).unwrap()).expect("could not write --out");
         log(&format!("wrote {} listed quotes to {out}", mints.len()));
     }
+}
+
+/// Makes the enabled set exactly the allowlist entries that have an Orca route with at least
+/// --min-tvl of liquidity: lists missing ones, enables listed ones, disables everything else.
+/// USDC and WSOL stay listed regardless (they are the routing hubs).
+fn admin_allow(rpc: &Rpc, payer: &Keypair, o: &Opts) {
+    let allow: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(o.get("allowlist")).expect("could not read --allowlist")).expect("bad allowlist");
+    let routes: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(o.get("routes")).expect("could not read --routes")).expect("bad routes json");
+    let min_tvl: f64 = o.get_or("min-tvl", "10000").parse().unwrap();
+    let c = Crank::new(rpc, payer.pubkey()).config();
+    let hub_pool: Pubkey = routes["hubPool"]["pool"].as_str().expect("hubPool.pool").parse().unwrap();
+    let route_of = |mint: &str| routes["routes"].as_array().unwrap().iter().find(|r| r["mint"] == mint).cloned();
+    let tvl_of = |r: &serde_json::Value| r["tvlUsd"].as_f64().or_else(|| r["tvlUsd"].as_str().and_then(|s| s.parse().ok())).unwrap_or(0.0);
+
+    let mut wanted: Vec<(Pubkey, String)> = vec![];
+    for e in allow["quotes"].as_array().expect("quotes") {
+        let (mint_s, sym) = (e["mint"].as_str().unwrap(), e["symbol"].as_str().unwrap_or("?").to_string());
+        let mint: Pubkey = mint_s.parse().unwrap();
+        if mint == c.usdc || mint == c.wsol {
+            wanted.push((mint, sym));
+            continue;
+        }
+        match route_of(mint_s) {
+            Some(r) if tvl_of(&r) >= min_tvl => wanted.push((mint, sym)),
+            Some(r) => log(&format!("skip {sym}: Orca route has only ${:.0} of liquidity", tvl_of(&r))),
+            None => log(&format!("skip {sym}: no Orca route against USDC or SOL")),
+        }
+    }
+
+    let listed = rpc.quote_entries();
+    let send_one = |label: String, ix: Instruction| {
+        let action = Action { label: "allow", ixs: vec![ix], signers: vec![] };
+        match send(rpc, payer, &action, o.priority_fee) {
+            Ok(_) => log(&label),
+            Err(e) => log(&format!("FAILED {label}: {}", first_line(&e))),
+        }
+    };
+    for (mint, sym) in &wanted {
+        match listed.iter().find(|q| q.mint == *mint) {
+            Some(q) if q.enabled => {}
+            Some(_) => send_one(format!("enabled {sym}"), set_quote_enabled_ix(&payer.pubkey(), mint, true)),
+            None => {
+                let hub_route = if *mint == c.usdc {
+                    None
+                } else if *mint == c.wsol {
+                    Some((c.usdc, hub_pool))
+                } else {
+                    let r = route_of(&mint.to_string()).unwrap();
+                    let hub = if r["hub"] == "USDC" { c.usdc } else { c.wsol };
+                    Some((hub, r["pool"].as_str().unwrap().parse().unwrap()))
+                };
+                send_one(format!("listed {sym}"), list_quote_ix(&payer.pubkey(), mint, hub_route));
+            }
+        }
+    }
+    for q in listed.iter().filter(|q| q.enabled && !wanted.iter().any(|(m, _)| *m == q.mint)) {
+        send_one(format!("disabled {}", q.mint), set_quote_enabled_ix(&payer.pubkey(), &q.mint, false));
+    }
+    log(&format!("{} quotes allowed", wanted.len()));
+    write_quotes_file(rpc, o);
 }
 
 fn admin_launch(rpc: &Rpc, payer: &Keypair, o: &Opts) {
