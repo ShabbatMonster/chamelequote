@@ -140,18 +140,35 @@ function renderHappenings() {
 
 function renderLinks() {
   const m = view.coin.mint;
+  const pool = view.pool;
+  // The pool changes with every quote switch; these links always point at the live one.
+  $("st-pool").textContent = pool ?? "—";
+  $("st-pool-pair").textContent = view.launched ? `Orca Whirlpool, ${view.coin.symbol} / ${view.active.symbol}` : "";
+  const links = {
+    axiom: pool && `https://axiom.trade/meme/${pool}`,
+    fomo: `https://fomo.family/tokens/solana/${m}`,
+    jup: `https://jup.ag/swap/${view.launched ? view.active.mint : "SOL"}-${m}`,
+    orca: pool && `https://www.orca.so/pools/${pool}`,
+    dex: `https://dexscreener.com/solana/${m}`,
+    scan: `https://solscan.io/token/${m}`,
+  };
   const set = (id, href) => {
     const a = $(id);
-    if (view.demo) {
+    if (!a) return;
+    if (view.demo || !href) {
       a.removeAttribute("href");
       a.setAttribute("aria-disabled", "true");
       a.title = "Available after launch";
-    } else a.href = href;
+    } else {
+      a.href = href;
+      a.removeAttribute("aria-disabled");
+      a.title = "";
+    }
   };
-  set("link-jup", `https://jup.ag/swap/${view.launched ? view.active.mint : "SOL"}-${m}`);
-  set("link-orca", `https://www.orca.so/pools/${view.pool ?? ""}`);
-  set("link-dex", `https://dexscreener.com/solana/${m}`);
-  set("link-scan", `https://solscan.io/token/${m}`);
+  for (const [k, href] of Object.entries(links)) {
+    set(`link-${k}`, href);
+    set(`tl-${k}`, href);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -272,12 +289,13 @@ function autoReconnect() {
   if (!tryIt()) setTimeout(tryIt, 800); // some wallets announce themselves a beat after load
 }
 
-async function copy(text) {
+async function copy(text, fallbackId = "st-ca") {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
+    // Clipboard blocked: select the text so the user can copy it by hand.
     const r = document.createRange();
-    r.selectNodeContents($("st-ca"));
+    r.selectNodeContents($(fallbackId));
     getSelection().removeAllRanges();
     getSelection().addRange(r);
   }
@@ -559,6 +577,7 @@ $("rename-form").addEventListener("submit", onRename);
 for (const id of ["rn-name", "rn-symbol", "rn-image"]) $(id).addEventListener("input", updatePreview);
 $("copy-ca").addEventListener("click", () => copy(view.coin.mint));
 $("copy-ca-menu").addEventListener("click", () => copy(view.coin.mint));
+$("copy-pool").addEventListener("click", () => view.pool && copy(view.pool, "st-pool"));
 
 if (DEMO) {
   $("demo-note").hidden = false;

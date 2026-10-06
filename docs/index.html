@@ -26,6 +26,8 @@
         <button type="button" role="menuitem" id="copy-ca-menu">Copy Contract Address</button>
       </div>
       <div class="menu" id="menu-trade" role="menu" hidden>
+        <a role="menuitem" id="link-axiom" href="#" target="_blank" rel="noopener">Trade on Axiom</a>
+        <a role="menuitem" id="link-fomo" href="#" target="_blank" rel="noopener">Trade on fomo.family</a>
         <a role="menuitem" id="link-jup" href="#" target="_blank" rel="noopener">Buy on Jupiter</a>
         <a role="menuitem" id="link-orca" href="#" target="_blank" rel="noopener">Orca Pool</a>
         <div class="menu-sep" role="separator"></div>
@@ -82,9 +84,17 @@
           <tr><th scope="row">Supply</th><td id="st-supply">&mdash;</td></tr>
           <tr><th scope="row">Renames / quote changes</th><td id="st-counts">&mdash;</td></tr>
           <tr><th scope="row">Contract address</th><td><code id="st-ca">&mdash;</code> <button type="button" class="btn btn-small" id="copy-ca">Copy</button></td></tr>
+          <tr><th scope="row">Current pool</th><td><code id="st-pool">&mdash;</code> <button type="button" class="btn btn-small" id="copy-pool">Copy</button><br><span class="small" id="st-pool-pair"></span></td></tr>
         </tbody>
       </table>
     </div>
+    <p class="trade-links">Trade it on:
+      <a id="tl-axiom" href="#" target="_blank" rel="noopener">Axiom</a> |
+      <a id="tl-fomo" href="#" target="_blank" rel="noopener">fomo.family</a> |
+      <a id="tl-jup" href="#" target="_blank" rel="noopener">Jupiter</a> |
+      <a id="tl-dex" href="#" target="_blank" rel="noopener">DexScreener</a> |
+      <a id="tl-orca" href="#" target="_blank" rel="noopener">Orca pool</a>
+    </p>
   </section>
 
   <div class="windows">

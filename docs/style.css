@@ -183,6 +183,8 @@ table.stats, table.log { border-collapse: separate; border-spacing: 2px; border:
 table.stats th, table.stats td, table.log th, table.log td { border: 1px inset var(--chrome); padding: 4px 8px; vertical-align: top; }
 table.stats th { text-align: left; font-weight: normal; width: 38%; background: var(--soft); }
 table.stats td { font-variant-numeric: tabular-nums; }
+.trade-links { margin: 10px 0 0; font-size: 13px; }
+.trade-links a { font-weight: bold; }
 table.log thead th { background: var(--chrome); font: bold 12px var(--ui); text-align: left; }
 table.log td:first-child { white-space: nowrap; }
 table.log tr.example td { color: #555; }
