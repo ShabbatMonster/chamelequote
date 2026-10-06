@@ -1,4 +1,6 @@
-# Chamelequote
+# Totality
+
+The coin and site at [totality.ws](https://totality.ws/) (the code base is still named chamelequote).
 
 A Solana coin whose holders can change two things by burning 1,000,000 tokens:
 

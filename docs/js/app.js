@@ -49,7 +49,7 @@ let combo;
 
 function render() {
   const v = view;
-  document.title = `${v.coin.name} ($${v.coin.symbol})`;
+  document.title = `${v.coin.name} ($${v.coin.symbol}) · Totality`;
   $("coin-name").textContent = v.coin.name;
   $("coin-symbol").textContent = v.coin.symbol;
   $("coin-image").hidden = !v.coin.image;

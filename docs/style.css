@@ -79,6 +79,14 @@ code { font: 12px var(--mono); word-break: break-all; }
   font: 12px var(--ui);
 }
 .menubar-left, .menubar-right { position: relative; display: flex; align-items: center; }
+.brand {
+  display: flex; align-items: center; gap: 5px; margin-right: 6px; padding: 2px 8px 2px 2px;
+  font-weight: bold; letter-spacing: .08em; text-transform: uppercase; color: var(--ink); text-decoration: none;
+  border-right: 1px solid var(--chrome-lo); box-shadow: 1px 0 0 var(--chrome-hi);
+}
+.brand img { display: block; border: 1px solid var(--chrome-dk); image-rendering: auto; }
+.footer-brand { display: flex; align-items: center; justify-content: center; gap: 8px; letter-spacing: .12em; }
+.footer-brand img { border: 1px solid var(--ink); }
 .menu-title {
   font: inherit; color: var(--ink); background: transparent;
   border: 1px solid transparent; padding: 3px 8px; margin: 0;
