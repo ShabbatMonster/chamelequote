@@ -483,14 +483,22 @@ async function onRename(e) {
   }
 }
 
+// The program's error names, in order: wallets often report only "custom program error: 0x…",
+// numbered from 6000.
+const PROGRAM_ERRORS = ["NotAdmin", "BadName", "BadSymbol", "BadUri", "ControlChars", "BadBurnAmount", "QuoteDisabled", "QuoteIsSelf", "InvalidParam", "NotAWhirlpool", "BadPosition", "MissingAccount", "BadRoute", "BadHub", "StalePrice", "AlreadyLaunched", "NotLaunched", "WrongPhase", "SameQuote", "WrongPool", "WrongTokenAccount", "PoolManipulated", "RouteOffAverage", "SlippageExceeded", "WrongHop", "NotAtTarget", "NothingToReprice", "NotExpired", "WrongQuote", "MathOverflow", "ForeignPool", "BelowPoolFloor", "NotAtomic", "CoolingDown"];
+
 function friendly(e) {
-  const s = String(e?.message ?? e);
+  let s = String(e?.message ?? e);
+  const code = /custom program error: 0x([0-9a-f]+)/i.exec(s);
+  if (code) s += " " + (PROGRAM_ERRORS[parseInt(code[1], 16) - 6000] ?? "");
   if (/reject|denied|cancel/i.test(s)) return "You cancelled it in your wallet. Nothing was burned.";
   if (/CoolingDown/.test(s)) return "The last switch was moments ago. The next one opens a few minutes after it. Nothing was burned.";
   if (/StalePrice/.test(s)) return "Prices are still settling after a big move. Try again in a few minutes.";
   if (/BelowPoolFloor/.test(s)) return "The coin would land below that quote's pool floor right now. Pick another quote. Nothing was burned.";
   if (/ForeignPool/.test(s)) return "That quote's pool was set up by someone else, so the coin can't use it. Nothing was burned.";
   if (/WrongPhase/.test(s)) return "Another switch is already running. Wait for it to finish.";
+  if (/QuoteDisabled/.test(s)) return "That quote isn't available any more. Pick another. Nothing was burned.";
+  if (/SameQuote/.test(s)) return "That's already the coin's quote. Nothing was burned.";
   if (/insufficient/i.test(s)) return "Not enough tokens or SOL for this.";
   return `Something went wrong: ${s.slice(0, 160)}`;
 }
