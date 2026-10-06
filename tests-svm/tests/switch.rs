@@ -309,3 +309,24 @@ fn keeper_cancels_a_switch_left_past_its_deadline() {
     assert_eq!(c.active_quote, usdc, "nothing was pulled, so the coin stays put");
     assert_eq!(env.balance(&whale_token), bal, "burn refunded");
 }
+
+#[test]
+fn abort_refund_cannot_be_redirected() {
+    let (mut env, whale) = traded();
+    let x = env.x;
+    env.request(&whale, x).unwrap();
+    env.warp(601);
+    let thief = env.funded();
+    let mint = env.mint;
+    let thief_token = env.ensure_ata(&thief.pubkey(), &mint);
+    let whale_token = chamelequote::whirlpool::ata(&whale.pubkey(), &env.mint, &anchor_spl::token::spl_token::ID);
+    let mut ix = env.abort_ix();
+    for m in ix.accounts.iter_mut() {
+        if m.pubkey == whale_token {
+            m.pubkey = thief_token;
+        }
+    }
+    let err = env.send(&[ix], &[&thief]).unwrap_err();
+    assert!(err.contains("WrongTokenAccount"), "{err}");
+    assert_eq!(env.balance(&thief_token), 0);
+}

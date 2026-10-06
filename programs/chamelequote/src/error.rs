@@ -58,6 +58,8 @@ pub enum ChameleonError {
     NothingToReprice,
     #[msg("Switch deadline has not passed")]
     NotExpired,
+    #[msg("Quote entry is not the one expected")]
+    WrongQuote,
     #[msg("Math overflow")]
     MathOverflow,
 }

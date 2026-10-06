@@ -5,6 +5,7 @@ exclude = ["tests-svm", "crank", "keeper"]
 resolver = "2"
 
 [profile.release]
+opt-level = "z"
 overflow-checks = true
 lto = "fat"
 codegen-units = 1

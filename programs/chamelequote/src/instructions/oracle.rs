@@ -30,12 +30,7 @@ pub fn poke_quotes<'info>(ctx: Context<'info, PokeQuotes>) -> Result<()> {
     for pair in rem.chunks(2) {
         let (entry_info, pool) = (&pair[0], &pair[1]);
         let mut entry: Account<QuoteEntry> = Account::try_from(entry_info)?;
-        require_keys_eq!(
-            entry_info.key(),
-            Pubkey::create_program_address(&[QUOTE_SEED, entry.mint.as_ref(), &[entry.bump]], &crate::ID)
-                .map_err(|_| ChameleonError::MissingAccount)?,
-            ChameleonError::MissingAccount
-        );
+        // Account::try_from checks owner and type; entries only ever exist at their mint's PDA.
         if entry.is_root() {
             continue;
         }
@@ -48,7 +43,7 @@ pub fn poke_quotes<'info>(ctx: Context<'info, PokeQuotes>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct PokePool<'info> {
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    #[account(mut)]
     pub config: Box<Account<'info, Config>>,
 
     /// CHECK: must be the active pool.

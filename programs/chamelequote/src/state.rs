@@ -24,7 +24,8 @@ pub const MIN_REALISED_VALUE_USDC: u128 = 1_000_000;
 
 pub const MAX_FEE_SHARE_BPS: u16 = 5000;
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace, Debug)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
+#[cfg_attr(not(target_os = "solana"), derive(Debug))]
 pub struct Ema {
     /// Q64.64 sqrt price in the orientation documented where it is stored.
     pub sqrt_price: u128,
@@ -71,7 +72,8 @@ pub fn within_bps(sqrt_a: u128, sqrt_b: u128, bps: u16) -> bool {
     diff * 10_000 <= one * bps as u128
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Default, InitSpace, Debug)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Default, InitSpace)]
+#[cfg_attr(not(target_os = "solana"), derive(Debug))]
 pub enum Phase {
     #[default]
     Idle,
@@ -83,7 +85,8 @@ pub enum Phase {
     Repricing,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace, Debug)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
+#[cfg_attr(not(target_os = "solana"), derive(Debug))]
 pub struct Switch {
     pub phase: Phase,
     pub requester: Pubkey,

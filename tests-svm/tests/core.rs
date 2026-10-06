@@ -147,7 +147,8 @@ fn rename_cannot_burn_someone_elses_tokens() {
     let thief = env.funded();
     let ix = rename_ix(&env, &thief.pubkey(), victim_ata, "X", "X", "https://x.y");
     let err = env.send(&[ix], &[&thief]).unwrap_err();
-    assert!(err.contains("ConstraintTokenOwner"), "{err}");
+    // The token program refuses the burn: only the owner (or its delegate) can burn.
+    assert!(err.contains("owner does not match"), "{err}");
     assert_eq!(env.balance(&victim_ata), BURN);
 }
 

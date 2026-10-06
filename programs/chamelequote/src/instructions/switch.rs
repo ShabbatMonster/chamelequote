@@ -15,7 +15,7 @@
 //! laid into whatever quote it is held in at that point.
 
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Burn, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Burn, Token, Transfer};
 
 use crate::{
     error::ChameleonError as E,
@@ -203,10 +203,9 @@ fn usd_sqrt(e: &QuoteEntry, wsol: &QuoteEntry, config: &Config, now: i64, strict
 pub struct Launch<'info> {
     pub admin: Signer<'info>,
 
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ E::NotAdmin)]
+    #[account(mut, has_one = admin @ E::NotAdmin)]
     pub config: Box<Account<'info, Config>>,
 
-    #[account(seeds = [QUOTE_SEED, quote.mint.as_ref()], bump = quote.bump)]
     pub quote: Box<Account<'info, QuoteEntry>>,
 }
 
@@ -237,24 +236,27 @@ pub fn launch(ctx: Context<Launch>, index_sqrt: u128) -> Result<()> {
 pub struct RequestSwitch<'info> {
     pub user: Signer<'info>,
 
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = mint)]
+    #[account(mut, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
 
-    pub mint: Box<Account<'info, Mint>>,
+    /// CHECK: our mint (has_one on config).
+    pub mint: UncheckedAccount<'info>,
 
-    #[account(mut, token::mint = mint, token::authority = user)]
-    pub user_token: Box<Account<'info, TokenAccount>>,
+    /// CHECK: the token program's transfer checks `user` owns it and that its mint matches the
+    /// escrow's (ours).
+    #[account(mut)]
+    pub user_token: UncheckedAccount<'info>,
 
+    /// CHECK: PDA.
     #[account(mut, seeds = [ESCROW_SEED], bump = config.escrow_bump)]
-    pub escrow: Box<Account<'info, TokenAccount>>,
+    pub escrow: UncheckedAccount<'info>,
 
-    #[account(seeds = [QUOTE_SEED, config.active_quote.as_ref()], bump = old_quote.bump)]
+    #[account(constraint = old_quote.mint == config.active_quote @ E::WrongQuote)]
     pub old_quote: Box<Account<'info, QuoteEntry>>,
 
-    #[account(seeds = [QUOTE_SEED, new_quote.mint.as_ref()], bump = new_quote.bump)]
     pub new_quote: Box<Account<'info, QuoteEntry>>,
 
-    #[account(seeds = [QUOTE_SEED, config.wsol.as_ref()], bump = wsol_quote.bump)]
+    #[account(constraint = wsol_quote.mint == config.wsol @ E::WrongQuote)]
     pub wsol_quote: Box<Account<'info, QuoteEntry>>,
 
     pub token_program: Program<'info, Token>,
@@ -313,7 +315,7 @@ pub struct Pull<'info> {
     #[account(mut)]
     pub cranker: Signer<'info>,
 
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    #[account(mut)]
     pub config: Box<Account<'info, Config>>,
 
     /// CHECK: PDA signer.
@@ -408,21 +410,20 @@ pub fn pull<'info>(ctx: Context<'info, Pull<'info>>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct Hop<'info> {
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    #[account(mut)]
     pub config: Box<Account<'info, Config>>,
 
     /// CHECK: PDA signer.
     #[account(seeds = [AUTHORITY_SEED], bump = config.authority_bump)]
     pub authority: UncheckedAccount<'info>,
 
-    #[account(seeds = [QUOTE_SEED, config.switch.holding.as_ref()], bump = holding.bump)]
+    #[account(constraint = holding.mint == config.switch.holding @ E::WrongQuote)]
     pub holding: Box<Account<'info, QuoteEntry>>,
 
-    #[account(seeds = [QUOTE_SEED, config.switch.target.as_ref()], bump = target.bump)]
+    #[account(constraint = target.mint == config.switch.target @ E::WrongQuote)]
     pub target: Box<Account<'info, QuoteEntry>>,
 
     /// The entry whose route pool this hop trades through.
-    #[account(seeds = [QUOTE_SEED, via.mint.as_ref()], bump = via.bump)]
     pub via: Box<Account<'info, QuoteEntry>>,
 
     pub pool: PoolSides<'info>,
@@ -515,7 +516,6 @@ pub fn hop<'info>(ctx: Context<'info, Hop<'info>>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct Reprice<'info> {
-    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Box<Account<'info, Config>>,
 
     /// CHECK: PDA signer.
@@ -589,7 +589,7 @@ pub struct Add<'info> {
     #[account(mut)]
     pub funder: Signer<'info>,
 
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = mint)]
+    #[account(mut, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
 
     /// CHECK: PDA signer.
@@ -599,11 +599,13 @@ pub struct Add<'info> {
     pub pool: PoolSides<'info>,
     pub positions: Positions<'info>,
 
+    /// CHECK: PDA.
     #[account(mut, seeds = [ESCROW_SEED], bump = config.escrow_bump)]
-    pub escrow: Box<Account<'info, TokenAccount>>,
+    pub escrow: UncheckedAccount<'info>,
 
+    /// CHECK: our mint (has_one on config).
     #[account(mut)]
-    pub mint: Box<Account<'info, Mint>>,
+    pub mint: UncheckedAccount<'info>,
 
     pub token_program: Program<'info, Token>,
     /// CHECK: address checked.
@@ -712,32 +714,32 @@ pub fn add<'info>(ctx: Context<'info, Add<'info>>) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct Abort<'info> {
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = mint)]
+    #[account(mut, has_one = mint)]
     pub config: Box<Account<'info, Config>>,
 
     /// CHECK: PDA signer.
     #[account(seeds = [AUTHORITY_SEED], bump = config.authority_bump)]
     pub authority: UncheckedAccount<'info>,
 
-    pub mint: Box<Account<'info, Mint>>,
+    /// CHECK: our mint (has_one on config).
+    pub mint: UncheckedAccount<'info>,
 
+    /// CHECK: PDA.
     #[account(mut, seeds = [ESCROW_SEED], bump = config.escrow_bump)]
-    pub escrow: Box<Account<'info, TokenAccount>>,
+    pub escrow: UncheckedAccount<'info>,
 
-    #[account(
-        mut,
-        associated_token::mint = mint,
-        associated_token::authority = config.switch.requester,
-    )]
-    pub requester_token: Box<Account<'info, TokenAccount>>,
+    /// CHECK: must be the requester's associated token account (checked in the handler), so a
+    /// refund can only go back to whoever burned.
+    #[account(mut)]
+    pub requester_token: UncheckedAccount<'info>,
 
-    #[account(seeds = [QUOTE_SEED, config.active_quote.as_ref()], bump = old_quote.bump)]
+    #[account(constraint = old_quote.mint == config.active_quote @ E::WrongQuote)]
     pub old_quote: Box<Account<'info, QuoteEntry>>,
 
-    #[account(seeds = [QUOTE_SEED, config.switch.holding.as_ref()], bump = holding.bump)]
+    #[account(constraint = holding.mint == config.switch.holding @ E::WrongQuote)]
     pub holding: Box<Account<'info, QuoteEntry>>,
 
-    #[account(seeds = [QUOTE_SEED, config.wsol.as_ref()], bump = wsol_quote.bump)]
+    #[account(constraint = wsol_quote.mint == config.wsol @ E::WrongQuote)]
     pub wsol_quote: Box<Account<'info, QuoteEntry>>,
 
     /// CHECK: the holding quote's mint.
@@ -755,6 +757,7 @@ pub fn abort(ctx: Context<Abort>) -> Result<()> {
     let s = config.switch;
     require!(matches!(s.phase, Phase::Requested | Phase::Swapping), E::WrongPhase);
     require!(now > s.deadline, E::NotExpired);
+    util::require_ata(&ctx.accounts.requester_token, &s.requester, &ctx.accounts.mint)?;
 
     let bump = [config.authority_bump];
     let auth_seeds: &[&[u8]] = &[AUTHORITY_SEED, &bump];

@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Burn, Mint, Token, TokenAccount};
+use anchor_spl::token::{self, Burn, Token};
 
 use crate::{metaplex, state::*, validate::validate_metadata};
 
@@ -9,14 +9,16 @@ use crate::{metaplex, state::*, validate::validate_metadata};
 pub struct Rename<'info> {
     pub user: Signer<'info>,
 
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = mint)]
+    #[account(mut, has_one = mint)]
     pub config: Account<'info, Config>,
 
+    /// CHECK: our mint (has_one on config).
     #[account(mut)]
-    pub mint: Account<'info, Mint>,
+    pub mint: UncheckedAccount<'info>,
 
-    #[account(mut, token::mint = mint, token::authority = user)]
-    pub user_token: Account<'info, TokenAccount>,
+    /// CHECK: the token program's burn checks it holds our mint and that `user` owns it.
+    #[account(mut)]
+    pub user_token: UncheckedAccount<'info>,
 
     /// CHECK: PDA signer for the metadata update.
     #[account(seeds = [AUTHORITY_SEED], bump = config.authority_bump)]

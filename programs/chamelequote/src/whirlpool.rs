@@ -71,7 +71,8 @@ pub fn ata(owner: &Pubkey, mint: &Pubkey, token_program: &Pubkey) -> Pubkey {
 // ---------------------------------------------------------------------------------------------
 // Account readers (fixed offsets, discriminator included)
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
+#[cfg_attr(not(target_os = "solana"), derive(Debug))]
 pub struct PoolState {
     pub whirlpools_config: Pubkey,
     pub tick_spacing: u16,
@@ -119,7 +120,8 @@ pub fn parse_pool(d: &[u8]) -> Option<PoolState> {
     })
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
+#[cfg_attr(not(target_os = "solana"), derive(Debug))]
 pub struct PositionState {
     pub whirlpool: Pubkey,
     pub liquidity: u128,

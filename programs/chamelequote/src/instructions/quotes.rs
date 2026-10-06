@@ -18,7 +18,7 @@ pub struct ListQuote<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
 
-    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ ChameleonError::NotAdmin)]
+    #[account(has_one = admin @ ChameleonError::NotAdmin)]
     pub config: Box<Account<'info, Config>>,
 
     /// spl-token or token-2022 mint; the owning program is recorded.
@@ -34,7 +34,6 @@ pub struct ListQuote<'info> {
     pub quote: Box<Account<'info, QuoteEntry>>,
 
     /// The hub's entry (USDC or WSOL). None only when listing USDC itself.
-    #[account(seeds = [QUOTE_SEED, hub_entry.mint.as_ref()], bump = hub_entry.bump)]
     pub hub_entry: Option<Box<Account<'info, QuoteEntry>>>,
 
     /// CHECK: validated as a Whirlpool between the quote and the hub. None only for USDC.
@@ -78,10 +77,10 @@ pub fn list_quote(ctx: Context<ListQuote>) -> Result<()> {
 pub struct AdminQuote<'info> {
     pub admin: Signer<'info>,
 
-    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ ChameleonError::NotAdmin)]
+    #[account(has_one = admin @ ChameleonError::NotAdmin)]
     pub config: Box<Account<'info, Config>>,
 
-    #[account(mut, seeds = [QUOTE_SEED, quote.mint.as_ref()], bump = quote.bump)]
+    #[account(mut)]
     pub quote: Box<Account<'info, QuoteEntry>>,
 }
 
@@ -96,10 +95,10 @@ pub fn set_quote_enabled(ctx: Context<AdminQuote>, enabled: bool) -> Result<()> 
 pub struct SetQuoteRoute<'info> {
     pub admin: Signer<'info>,
 
-    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ ChameleonError::NotAdmin)]
+    #[account(has_one = admin @ ChameleonError::NotAdmin)]
     pub config: Box<Account<'info, Config>>,
 
-    #[account(mut, seeds = [QUOTE_SEED, quote.mint.as_ref()], bump = quote.bump)]
+    #[account(mut)]
     pub quote: Box<Account<'info, QuoteEntry>>,
 
     /// CHECK: validated as a Whirlpool between the quote and its hub.
@@ -125,7 +124,7 @@ pub fn set_quote_route(ctx: Context<SetQuoteRoute>) -> Result<()> {
 pub struct AdminConfig<'info> {
     pub admin: Signer<'info>,
 
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ ChameleonError::NotAdmin)]
+    #[account(mut, has_one = admin @ ChameleonError::NotAdmin)]
     pub config: Box<Account<'info, Config>>,
 }
 
