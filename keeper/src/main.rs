@@ -21,10 +21,12 @@
 //!                 [--out docs/quotes.json]   (the listed mints, for the website)
 //!   keeper launch --quote <mint> --price-num <n> --price-den <n>   (raw quote per raw token)
 //!   keeper request --quote <mint>   burn the keypair's coins to request a switch (testing)
+//!   keeper routes                   each enabled quote's route pool against Jupiter (report only)
 //!   keeper allow  --allowlist data/allowlist.json --routes data/orca-routes.json [--min-tvl 10000]
 //!                 [--out docs/quotes.json]   enable exactly the allowlist (listing what's missing)
 
 mod fast;
+mod jupiter;
 
 use std::{
     thread::sleep,
@@ -193,6 +195,7 @@ fn send(rpc: &Rpc, payer: &Keypair, action: &Action, priority_fee: u64) -> Resul
             cu_limit(action.label),
             priority_fee,
             CommitmentConfig::confirmed(),
+            None,
         );
     }
     // Simulate (so program errors come back with their logs), then rebroadcast every 2 s until
@@ -364,14 +367,19 @@ fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
 fn poke_loop(url: String, payer: Keypair, fee: u64) {
     let rpc = Rpc(RpcClient::new_with_commitment(url, CommitmentConfig::confirmed()));
     let mut quotes = rpc.quote_entries();
-    let mut last_list = Instant::now();
+    let mut last_list = None::<Instant>;
     loop {
-        if last_list.elapsed() >= RELIST_EVERY {
+        if last_list.is_none_or(|t| t.elapsed() >= RELIST_EVERY) {
+            // Route pools checked against Jupiter, then the list re-read (it may have changed).
+            let check = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jupiter::check_routes(&rpc, &payer, &quotes, fee, false)));
+            if check.is_err() {
+                log("route check failed to read state; retrying later");
+            }
             let fresh = rpc.quote_entries();
             if !fresh.is_empty() {
                 quotes = fresh;
             }
-            last_list = Instant::now();
+            last_list = Some(Instant::now());
         }
         let started = Instant::now();
         let round = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| poke_round(&rpc, &payer, &quotes, fee)));
@@ -501,7 +509,7 @@ fn main() {
     let rpc = Rpc(RpcClient::new_with_commitment(o.rpc.clone(), CommitmentConfig::confirmed()));
     match cmd.as_str() {
         "status" => return status(&rpc),
-        "run" | "once" | "init" | "list" | "launch" | "allow" | "request" => {}
+        "run" | "once" | "init" | "list" | "launch" | "allow" | "request" | "routes" => {}
         _ => {
             println!("usage: keeper run|once|status|init|list|launch --rpc <url> --keypair <path> ... (see source header)");
             return;
@@ -520,6 +528,7 @@ fn main() {
         "list" => return admin_list(&rpc, &payer, &o),
         "launch" => return admin_launch(&rpc, &payer, &o),
         "allow" => return admin_allow(&rpc, &payer, &o),
+        "routes" => return jupiter::check_routes(&rpc, &payer, &rpc.quote_entries(), o.priority_fee, true),
         "request" => {
             // Burns the keypair's own coins: a holder's switch request, for testing and ops.
             let c = Crank::new(&rpc, payer.pubkey()).config();

@@ -17,7 +17,8 @@ use chamelequote_crank::{unique_accounts, Crank, MAX_TX_ACCOUNTS};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_message::{v0, AddressLookupTableAccount, VersionedMessage};
-use solana_rpc_client_api::config::{RpcSendTransactionConfig, RpcSimulateTransactionConfig};
+use solana_account_decoder_client_types::UiAccountEncoding;
+use solana_rpc_client_api::config::{RpcSendTransactionConfig, RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig};
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
@@ -152,8 +153,12 @@ fn budget(units: u32, price: u64) -> Vec<Instruction> {
     out
 }
 
-/// Builds, checks limits, simulates and sends one v0 transaction (`signers` after the payer),
-/// then waits until it reaches `commitment`.
+/// Checks a simulation before sending: given token accounts to watch, it receives their balances
+/// after the simulated transaction and may veto it.
+pub type Verify<'a> = (&'a [Pubkey], &'a dyn Fn(&[u64]) -> Result<(), String>);
+
+/// Builds, checks limits, simulates (and lets `verify` look at the result) and sends one v0
+/// transaction (`signers` after the payer), then waits until it reaches `commitment`.
 #[allow(clippy::too_many_arguments)]
 pub fn send_v0(
     rpc: &Rpc,
@@ -165,6 +170,7 @@ pub fn send_v0(
     units: u32,
     price: u64,
     commitment: CommitmentConfig,
+    verify: Option<Verify>,
 ) -> Result<String, String> {
     let n = unique_accounts(ixs, &payer.pubkey());
     if n > MAX_TX_ACCOUNTS {
@@ -191,6 +197,10 @@ pub fn send_v0(
                 sig_verify: false,
                 replace_recent_blockhash: true,
                 commitment: Some(CommitmentConfig::processed()),
+                accounts: verify.map(|(watch, _)| RpcSimulateTransactionAccountsConfig {
+                    encoding: Some(UiAccountEncoding::Base64),
+                    addresses: watch.iter().map(|k| k.to_string()).collect(),
+                }),
                 ..Default::default()
             },
         )
@@ -200,6 +210,22 @@ pub fn send_v0(
         let logs = sim.logs.unwrap_or_default();
         let why: Vec<&String> = logs.iter().filter(|l| l.contains("Error") || l.contains("failed")).collect();
         return Err(format!("{label} would fail: {err:?} {why:?}"));
+    }
+    if let Some((_, check)) = verify {
+        // Token amount (offset 64) of each watched account after the simulation; 0 if absent.
+        let after: Vec<u64> = sim
+            .accounts
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|a| {
+                a.and_then(|a| a.data.decode())
+                    .filter(|d| d.len() >= 72)
+                    .map(|d| u64::from_le_bytes(d[64..72].try_into().unwrap()))
+                    .unwrap_or(0)
+            })
+            .collect();
+        check(&after).map_err(|e| format!("{label}: {e}"))?;
     }
     // Rebroadcast every 2 s until it lands (or 30 s): a dropped send costs seconds, not the
     // minute the RPC client's own confirm loop waits.
@@ -257,10 +283,29 @@ pub fn try_fast(rpc: &Rpc, payer: &Keypair, fee: u64) -> Result<bool, String> {
         return Err(compact.err().unwrap_or_default());
     }
     let alts = ensure_alts(rpc, payer, &needed, fee)?;
+
+    // Cross-check with Jupiter before anything is sent: how much of the old quote comes out of
+    // the active pool (its quote vault) against how much of the new one lands in the target pool
+    // (its quote vault, plus whatever the program keeps aside), from the simulation.
+    let c = crank.config();
+    let old_vault = crank.our_pool(&c.active_pool).map(|p| p.vault_b).ok_or("active pool missing")?;
+    let new_vault = crank.our_pool(&est.target_pool).map(|p| p.vault_b).unwrap_or_else(|| {
+        chamelequote::damm::vault_address(&est.target_pool, &c.switch.target)
+    });
+    let ours_new = crank.ours(&c.switch.target);
+    let watch = [old_vault, new_vault, ours_new];
+    let before: Vec<u64> = watch.iter().map(|k| crank.balance(k)).collect();
+    let (from, to) = (c.active_quote, c.switch.target);
+    let check = move |after: &[u64]| {
+        let pulled = before[0].saturating_sub(after[0]);
+        let delivered = (after[1] + after[2]).saturating_sub(before[1] + before[2]);
+        crate::jupiter::check_switch(&from, &to, pulled, delivered)
+    };
+
     let confirmed = CommitmentConfig::confirmed();
     let mut last = String::new();
     for ixs in [compact, full].into_iter().flatten() {
-        match send_v0(rpc, payer, &[], "switch", &ixs, &alts, 1_400_000, SWITCH_PRIORITY, confirmed) {
+        match send_v0(rpc, payer, &[], "switch", &ixs, &alts, 1_400_000, SWITCH_PRIORITY, confirmed, Some((&watch, &check))) {
             Ok(_) => return Ok(true),
             Err(e) => {
                 log(&format!("switch attempt: {}", first_line(&e)));

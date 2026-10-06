@@ -60,6 +60,8 @@ It needs a funded wallet. Each poke round costs a few transactions a minute, and
 
 ## Known risks
 
+- Route pools are the weak point: each quote's backing is swapped through one fixed Orca pool, and a thin or gamed pool would cost the backing. On-chain, the program refuses a hop priced more than 2% off its average or paying more than 2% (after the pool fee) below it. Off-chain, the keeper simulates every switch and doesn't send it if the route delivers more than 3% less than Jupiter's best quote, and every 10 minutes disables quotes whose route pool has under $10k of liquidity or is priced more than 5% off Jupiter (`keeper routes` shows the report).
+
 - Unaudited. The price-average manipulation defence is the part to audit first.
 - Tokenized stocks (xStocks) are issued by a company that can freeze or move them, including the coin's backing while it sits in one.
 - The admin key can list quotes (it can't touch funds or metadata). Renounce it with `set_admin(default)` once the list is final.
