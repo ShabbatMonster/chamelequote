@@ -47,22 +47,33 @@ export function initMenus(bar) {
  */
 export function initCombo(root, { options = [], value = null, placeholder = "", onChange = () => {} } = {}) {
   const field = root.querySelector(".combo-field");
+  const pop = root.querySelector(".combo-pop");
+  const search = root.querySelector(".combo-search");
   const list = root.querySelector(".combo-list");
   let opts = options;
   let current = value;
   let active = -1;
-  let typed = "";
-  let typedAt = 0;
+  let query = "";
 
   const label = () => {
     const o = opts.find((x) => x.value === current);
     field.querySelector(".combo-value").textContent = o ? `${o.label}${o.detail ? " — " + o.detail : ""}` : placeholder;
   };
 
+  // Indices of the options matching the search: ticker, name or address, any part of it.
+  const visible = () => {
+    const q = query.trim().toLowerCase();
+    return opts
+      .map((o, i) => i)
+      .filter((i) => !q || [opts[i].label, opts[i].detail ?? "", opts[i].value].some((t) => t.toLowerCase().includes(q)));
+  };
+
   const render = () => {
     list.innerHTML = "";
     let group = null;
-    opts.forEach((o, i) => {
+    const shown = visible();
+    for (const i of shown) {
+      const o = opts[i];
       if (o.group !== group) {
         group = o.group;
         const g = document.createElement("li");
@@ -81,7 +92,14 @@ export function initCombo(root, { options = [], value = null, placeholder = "", 
       li.lastChild.textContent = o.detail ?? "";
       if (o.disabled) li.setAttribute("aria-disabled", "true");
       list.append(li);
-    });
+    }
+    if (!shown.length) {
+      const li = document.createElement("li");
+      li.className = "combo-empty";
+      li.setAttribute("role", "presentation");
+      li.textContent = query ? `Nothing matches "${query}".` : "Nothing to choose yet.";
+      list.append(li);
+    }
   };
 
   const highlight = (i) => {
@@ -90,34 +108,68 @@ export function initCombo(root, { options = [], value = null, placeholder = "", 
     const li = list.querySelector(`[data-index="${i}"]`);
     if (!li) return;
     li.classList.add("active");
-    field.setAttribute("aria-activedescendant", li.id);
+    (search ?? field).setAttribute("aria-activedescendant", li.id);
     li.scrollIntoView({ block: "nearest" });
   };
 
-  const isOpen = () => !list.hidden;
-  const openList = () => {
-    list.hidden = false;
+  const isOpen = () => !(pop ?? list).hidden;
+  const openList = (seed = "") => {
+    query = seed;
+    if (search) search.value = seed;
+    render();
+    (pop ?? list).hidden = false;
     field.setAttribute("aria-expanded", "true");
-    highlight(Math.max(0, opts.findIndex((o) => o.value === current)));
+    const shown = visible();
+    highlight(seed ? shown[0] ?? -1 : Math.max(0, opts.findIndex((o) => o.value === current)));
+    search?.focus();
   };
-  const closeList = () => {
-    list.hidden = true;
+  const closeList = (refocus = false) => {
+    if (!isOpen()) return;
+    (pop ?? list).hidden = true;
     field.setAttribute("aria-expanded", "false");
+    if (refocus) field.focus();
   };
   const pick = (i) => {
     const o = opts[i];
     if (!o || o.disabled) return;
     current = o.value;
-    render();
     label();
-    closeList();
+    closeList(true);
     onChange(current);
+  };
+
+  // Up/down move through what the search shows, skipping disabled options.
+  const step = (d) => {
+    const shown = visible().filter((i) => !opts[i].disabled);
+    if (!shown.length) return;
+    const at = shown.indexOf(active);
+    highlight(shown[at < 0 ? 0 : Math.min(shown.length - 1, Math.max(0, at + d))]);
+  };
+  const navKeys = (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!isOpen()) return openList();
+      step(e.key === "ArrowDown" ? 1 : -1);
+      return true;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      isOpen() ? pick(active) : openList();
+      return true;
+    }
+    if (e.key === "Escape" && isOpen()) {
+      e.preventDefault();
+      closeList(true);
+      return true;
+    }
+    return false;
   };
 
   field.addEventListener("click", (e) => {
     e.stopPropagation();
     isOpen() ? closeList() : openList();
   });
+  pop?.addEventListener("click", (e) => e.stopPropagation());
   list.addEventListener("click", (e) => {
     e.stopPropagation();
     const li = e.target.closest("[role=option]");
@@ -128,30 +180,23 @@ export function initCombo(root, { options = [], value = null, placeholder = "", 
     if (li && +li.dataset.index !== active) highlight(+li.dataset.index);
   });
   field.addEventListener("keydown", (e) => {
-    const step = (d) => {
-      let i = active;
-      do i = Math.min(opts.length - 1, Math.max(0, i + d));
-      while (opts[i]?.disabled && i > 0 && i < opts.length - 1);
-      highlight(i);
-    };
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    if (navKeys(e)) return;
+    if (e.key === " ") {
       e.preventDefault();
-      if (!isOpen()) return openList();
-      step(e.key === "ArrowDown" ? 1 : -1);
-    } else if (e.key === "Home" && isOpen()) highlight(0), e.preventDefault();
-    else if (e.key === "End" && isOpen()) highlight(opts.length - 1), e.preventDefault();
-    else if (e.key === "Enter" || e.key === " ") {
+      openList();
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // Typing on the closed box starts a search.
       e.preventDefault();
-      isOpen() ? pick(active) : openList();
-    } else if (e.key === "Escape") closeList();
-    else if (e.key.length === 1) {
-      typed = Date.now() - typedAt > 700 ? e.key : typed + e.key;
-      typedAt = Date.now();
-      const i = opts.findIndex((o) => o.label.toLowerCase().startsWith(typed.toLowerCase()));
-      if (i >= 0) (isOpen() ? highlight(i) : pick(i));
+      openList(e.key);
     }
   });
-  document.addEventListener("click", closeList);
+  search?.addEventListener("keydown", navKeys);
+  search?.addEventListener("input", () => {
+    query = search.value;
+    render();
+    highlight(visible().find((i) => !opts[i].disabled) ?? -1);
+  });
+  document.addEventListener("click", () => closeList());
 
   render();
   label();

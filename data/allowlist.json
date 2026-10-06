@@ -1,413 +1,2541 @@
 {
- "note": "Quotes the coin may switch to: Backpack tokens, wrapped majors, SOL, USDC, USDT. `keeper allow` enables exactly these (those with a liquid enough Orca route) and disables every other listed quote.",
+ "note": "Quotes the coin may switch to: every stonkfun approved quote except transfer-fee tokens. `keeper allow --min-tvl 10000` enables exactly those with a liquid enough Orca route and disables every other listed quote.",
+ "source": "https://stonkfun.xyz/api/quote-tokens",
  "quotes": [
   {
+   "mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
+   "symbol": "SPYX",
+   "category": "xstock"
+  },
+  {
+   "mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+   "symbol": "NVDAX",
+   "category": "xstock"
+  },
+  {
+   "mint": "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN",
+   "symbol": "GOOGLX",
+   "category": "xstock"
+  },
+  {
+   "mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ",
+   "symbol": "QQQX",
+   "category": "xstock"
+  },
+  {
+   "mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+   "symbol": "TSLAX",
+   "category": "xstock"
+  },
+  {
+   "mint": "XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1",
+   "symbol": "CRCLX",
+   "category": "xstock"
+  },
+  {
+   "mint": "Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu",
+   "symbol": "COINX",
+   "category": "xstock"
+  },
+  {
+   "mint": "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ",
+   "symbol": "MSTRX",
+   "category": "xstock"
+  },
+  {
+   "mint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg",
+   "symbol": "AMZNX",
+   "category": "xstock"
+  },
+  {
+   "mint": "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg",
+   "symbol": "HOODX",
+   "category": "xstock"
+  },
+  {
+   "mint": "Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8",
+   "symbol": "SPCXX",
+   "category": "xstock"
+  },
+  {
+   "mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+   "symbol": "APPLX",
+   "category": "xstock"
+  },
+  {
+   "mint": "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re",
+   "symbol": "GLDX",
+   "category": "xstock"
+  },
+  {
+   "mint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu",
+   "symbol": "METAX",
+   "category": "xstock"
+  },
+  {
+   "mint": "XsoBhf2ufR8fTyNSjqfU71DYGaE6Z3SUGAidpzriAA4",
+   "symbol": "PLTRX",
+   "category": "xstock"
+  },
+  {
+   "mint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+   "symbol": "MSFTX",
+   "category": "xstock"
+  },
+  {
+   "mint": "Xsf9mBktVB9BSU5kf4nHxPq5hCBJ2j2ui3ecFGxPRGc",
+   "symbol": "GMEX",
+   "category": "xstock"
+  },
+  {
+   "mint": "Xs78JED6PFZxWc2wCEPspZW9kL3Se5J7L5TChKgsidH",
+   "symbol": "STRCX",
+   "category": "xstock"
+  },
+  {
+   "mint": "XsqE9cRRpzxcGKDXj1BJ7Xmg4GRhZoyY1KpmGSxAWT2",
+   "symbol": "MCDX",
+   "category": "xstock"
+  },
+  {
+   "mint": "Xs6B6zawENwAbWVi7w92rjazLuAr5Az59qgWKcNb45x",
+   "symbol": "BRKX",
+   "category": "xstock"
+  },
+  {
    "mint": "MUxEsUKSMACyw5fZf68wxf5FLnZVhtU9CwH8uNNGay1",
-   "symbol": "MU"
+   "symbol": "MU",
+   "category": "backpack"
   },
   {
    "mint": "BoTx8y9ynfdxf5ZjWtCoBVkff52qKA82ysaLU8ZM6d8T",
-   "symbol": "ROBOSTRATEGY"
+   "symbol": "ROBOSTRATEGY",
+   "category": "backpack"
   },
   {
    "mint": "SKHYhSjuRWHgikq8eRKbtBbpABgJSkd7ytQV14i9EQ3",
-   "symbol": "SKHY"
+   "symbol": "SKHY",
+   "category": "backpack"
   },
   {
    "mint": "SNDKbwMUQvZhnLnxLduradgLHG5KrPuKwpnrkkGRhfH",
-   "symbol": "SNDK"
+   "symbol": "SNDK",
+   "category": "backpack"
+  },
+  {
+   "mint": "XsaBXg8dU5cPM6ehmVctMkVqoiRG2ZjMo1cyBJ3AykQ",
+   "symbol": "KOX",
+   "category": "xstock"
+  },
+  {
+   "mint": "XshPgPdXFRWB8tP1j82rebb2Q9rPgGX37RuqzohmArM",
+   "symbol": "INTCX",
+   "category": "xstock"
+  },
+  {
+   "mint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+   "symbol": "EURC",
+   "category": "currency"
   },
   {
    "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-   "symbol": "USDC"
+   "symbol": "USDC",
+   "category": "currency"
+  },
+  {
+   "mint": "5Y8NV33Vv7WbnLfq3zBcKSdYPrk7g2KoiQoe7M2tcxp5",
+   "symbol": "ONYC",
+   "category": "currency"
   },
   {
    "mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
-   "symbol": "USDT"
+   "symbol": "USDT",
+   "category": "currency"
+  },
+  {
+   "mint": "9BEcn9aPEmhSPbPQeFGjidRiEKki46fVQDyPpSQXPA2D",
+   "symbol": "JLUSDC",
+   "category": "currency"
   },
   {
    "mint": "DRAMjSWR7HRfJKjRkvQWYL2bcaejaVhuxEcjf4pAY4Cw",
-   "symbol": "DRAM"
+   "symbol": "DRAM",
+   "category": "backpack"
+  },
+  {
+   "mint": "9cRCn9rGT8V2imeM2BaKs13yhMEais3ruM3rPvTGpump",
+   "symbol": "ANSEM",
+   "category": "custom"
+  },
+  {
+   "mint": "7ssJZGFT3twGqeYA1kvpoMWwZYvMZvrMEbjRaWgg46BL",
+   "symbol": "BUTTHOLE",
+   "category": "custom"
+  },
+  {
+   "mint": "Ai66LHZG9MCzg1WKdawwqduVAXpNDUuV8M3uyq5ppump",
+   "symbol": "CATE",
+   "category": "custom"
+  },
+  {
+   "mint": "Dz9mQ9NzkBcCsuGPFJ3r1bS4wgqKMHBPiVuniW8Mbonk",
+   "symbol": "USELESS",
+   "category": "custom"
+  },
+  {
+   "mint": "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump",
+   "symbol": "Fartcoin",
+   "category": "custom"
+  },
+  {
+   "mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+   "symbol": "JUP",
+   "category": "custom"
+  },
+  {
+   "mint": "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn",
+   "symbol": "PUMP",
+   "category": "custom"
+  },
+  {
+   "mint": "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",
+   "symbol": "TRUMP",
+   "category": "custom"
+  },
+  {
+   "mint": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+   "symbol": "$WIF",
+   "category": "custom"
+  },
+  {
+   "mint": "GiG7Hr61RVm4CSUxJmgiCoySFQtdiwxtqf64MsRppump",
+   "symbol": "SCF",
+   "category": "custom"
+  },
+  {
+   "mint": "6GmAFSYs4gk3FDao5FzzySQpPZaWsa4rUJHacpMpUNgx",
+   "symbol": "STONK",
+   "category": "custom"
+  },
+  {
+   "mint": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+   "symbol": "Bonk",
+   "category": "custom"
+  },
+  {
+   "mint": "METvsvVRapdj9cFLzq4Tr43xK4tAjQfwX76z3n6mWQL",
+   "symbol": "MET",
+   "category": "custom"
+  },
+  {
+   "mint": "CashcatZMRn4Jv8sPQZUSsbTLi2PcPe1ssqbHcnaJqSS",
+   "symbol": "CASHCAT",
+   "category": "custom"
   },
   {
    "mint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij",
-   "symbol": "cbBTC"
+   "symbol": "cbBTC",
+   "category": "custom"
+  },
+  {
+   "mint": "4sWNB8zGWHkh6UnmwiEtzNxL4XrN7uK9tosbESbJFfVs",
+   "symbol": "xSOL",
+   "category": "leverage"
+  },
+  {
+   "mint": "8XtRWb4uAAJFMP4QQhoYYCWR6XXb7ybcCdiqPwz9s5WS",
+   "symbol": "ALON",
+   "category": "custom"
+  },
+  {
+   "mint": "DC6HP2A7SUy49WeazfeWgbwxVpzKdEPuB46mtb7XBzWx",
+   "symbol": "STONKS",
+   "category": "custom"
+  },
+  {
+   "mint": "9jVRLpzqYQBBhVejgtvCrBnivng62fjWrHxePh79pump",
+   "symbol": "KLEF",
+   "category": "custom"
+  },
+  {
+   "mint": "J8PSdNP3QewKq2Z1JJJFDMaqF7KcaiJhR7gbr5KZpump",
+   "symbol": "TripleT",
+   "category": "custom"
+  },
+  {
+   "mint": "Ce2gx9KGXJ6C9Mp5b5x1sn9Mg87JwEbrQby4Zqo3pump",
+   "symbol": "neet",
+   "category": "custom"
+  },
+  {
+   "mint": "5UUH9RTDiSpq6HKS6bp4NdU9PNJpXRXuiw6ShBTBhgH2",
+   "symbol": "TROLL",
+   "category": "custom"
   },
   {
    "mint": "So11111111111111111111111111111111111111112",
-   "symbol": "SOL"
+   "symbol": "SOL",
+   "category": "solana"
+  },
+  {
+   "mint": "GkyPYa7NnCFbduLknCfBfP7p8564X1VZhwZYJ6CZpump",
+   "symbol": "CHILLHOUSE",
+   "category": "custom"
+  },
+  {
+   "mint": "uniHfuPhEQSrtpzXpJZDCSq53yaejKKpNhFUiKoHKHV",
+   "symbol": "UNI",
+   "category": "custom"
+  },
+  {
+   "mint": "3BgwJ8b7b9hHX4sgfZ2KJhv9496CoVfsMK2YePevsBRw",
+   "symbol": "EPIK",
+   "category": "custom"
+  },
+  {
+   "mint": "CARDSccUMFKoPRZxt5vt3ksUbxEFEcnZ3H2pd3dKxYjp",
+   "symbol": "CARDS",
+   "category": "custom"
   },
   {
    "mint": "CtzPWv73Sn1dMGVU3ZtLv9yWSyUAanBni19YWDaznnkn",
-   "symbol": "xBTC"
+   "symbol": "xBTC",
+   "category": "custom"
   },
   {
    "mint": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
-   "symbol": "WBTC"
+   "symbol": "WBTC",
+   "category": "custom"
+  },
+  {
+   "mint": "Cm6fNnMk7NfzStP9CZpsQA2v3jjzbcYGAxdJySmHpump",
+   "symbol": "Buttcoin",
+   "category": "custom"
+  },
+  {
+   "mint": "9zqre5sRRdFvKqyTyvEd1jcKDRF4g47s7mZSGUnQpump",
+   "symbol": "boob",
+   "category": "custom"
+  },
+  {
+   "mint": "4TyZGqRLG3VcHTGMcLBoPUmqYitMVojXinAmkL8xpump",
+   "symbol": "testicle",
+   "category": "custom"
+  },
+  {
+   "mint": "8fZL148nnC168RAVCZh4PkjvMZmxMEfMLDhoziWVPnqf",
+   "symbol": "NiggaButt",
+   "category": "custom"
+  },
+  {
+   "mint": "BCdwQBAn8dYB5YjTsoB6TdHAWokxv28k2oZUodERpump",
+   "symbol": "MANIFEST",
+   "category": "custom"
+  },
+  {
+   "mint": "98sMhvDwXj1RQi5c5Mndm3vPe9cBqPrbLaufMXFNMh5g",
+   "symbol": "HYPE",
+   "category": "custom"
+  },
+  {
+   "mint": "J3NKxxXZcnNiMjKw9hYb2K4LUxgwB6t1FtPtQVsv3KFr",
+   "symbol": "SPX",
+   "category": "custom"
+  },
+  {
+   "mint": "69G8CpUVZAxbPMiEBrfCCCH445NwFxH6PzVL693Xpump",
+   "symbol": "xavier",
+   "category": "custom"
+  },
+  {
+   "mint": "GhuEi5AWtZaWuAda4ysJwMTzU8oMdjiL1bz6eziptT2p",
+   "symbol": "FROGE",
+   "category": "custom"
+  },
+  {
+   "mint": "2q68mqEbjwmnMjs1o3KZDNZVyMv6RZKkHcm64iinpump",
+   "symbol": "RETARD",
+   "category": "custom"
+  },
+  {
+   "mint": "4az7oyuUFco8GedLkWYzopurgadkSz8n64xCEXNYpump",
+   "symbol": "Agartha",
+   "category": "custom"
+  },
+  {
+   "mint": "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr",
+   "symbol": "POPCAT",
+   "category": "custom"
+  },
+  {
+   "mint": "13i7SfDDzg3t4MQnfZNtFKptHpv8HR2eaGRMfetSpump",
+   "symbol": "\u00e7\u2020\u0160\u00e7\u0152\u00ab",
+   "category": "custom"
+  },
+  {
+   "mint": "991L48va9rMiysu3fCpeg5p9bN4NLzhujojzmFtkgacE",
+   "symbol": "spurdo",
+   "category": "custom"
+  },
+  {
+   "mint": "6oGuFDbEeaSzTcvrmmd2MqfNYwHKXFoN7regcR22pump",
+   "symbol": "NEEGY",
+   "category": "custom"
+  },
+  {
+   "mint": "FDEF2U9geiWS7sdGPCUo2r1wGswkJr2mmVTECiH6pump",
+   "symbol": "MITCH",
+   "category": "custom"
+  },
+  {
+   "mint": "6Rwcmkz9yiYVM5EzyMcr4JsQPGEAWhcUvLvfBperYnUt",
+   "symbol": "KWIF",
+   "category": "custom"
+  },
+  {
+   "mint": "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS",
+   "symbol": "ZEC",
+   "category": "custom"
   },
   {
    "mint": "9gP2kCy3wA1ctvYWQk75guqXuHfrEomqydHLtcTCqiLa",
-   "symbol": "WBNB"
+   "symbol": "WBNB",
+   "category": "custom"
+  },
+  {
+   "mint": "63LfDmNb3MQ8mw9MtZ2To9bEA2M71kZUUGq5tiJxcqj9",
+   "symbol": "GIGA",
+   "category": "custom"
   },
   {
    "mint": "6UpQcMAb5xMzxc7ZfPaVMgx3KqsvKZdT5U718BzD5We2",
-   "symbol": "wXRP"
+   "symbol": "wXRP",
+   "category": "custom"
+  },
+  {
+   "mint": "HBrfYZgeLKdSvBBGnGkvAK4563pq8oBGpgNFAaespump",
+   "symbol": "OnlyMarms",
+   "category": "custom"
+  },
+  {
+   "mint": "AywAYdNJnSLSXwKWYxDciPjqGRnwp4iZdQptuuQTpump",
+   "symbol": "MICHI",
+   "category": "custom"
+  },
+  {
+   "mint": "CB9dDufT3ZuQXqqSfa1c5kY935TEreyBw9XJXxHKpump",
+   "symbol": "USDUC",
+   "category": "custom"
+  },
+  {
+   "mint": "F7pB3ZdfBnyFw2LRHydWEn9BmhEa5XihXLjhySFRpump",
+   "symbol": "NOTHING",
+   "category": "custom"
+  },
+  {
+   "mint": "H8xQ6poBjB9DTPMDTKWzWPrnxu4bDEhybxiouF8Ppump",
+   "symbol": "Tokabu",
+   "category": "custom"
+  },
+  {
+   "mint": "2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv",
+   "symbol": "PENGU",
+   "category": "custom"
+  },
+  {
+   "mint": "Ge87EtsjwRQbHaqQmKRno69RFTwh9bfSsm99XNxTpump",
+   "symbol": "Jimothy",
+   "category": "custom"
+  },
+  {
+   "mint": "3ZLekZYq2qkZiSpnSvabjit34tUkjSwD1JFuW9as9wBG",
+   "symbol": "NEAR",
+   "category": "custom"
+  },
+  {
+   "mint": "9Pfync3ejPC9eHqVzq3nYQJAhyhjqpnB9UsaSfLxpump",
+   "symbol": "KET",
+   "category": "custom"
   },
   {
    "mint": "TTWofwAge91oFhZs7kpQdyrVRkmevgM88xijGvQFbKo",
-   "symbol": "TTWO"
+   "symbol": "TTWO",
+   "category": "backpack"
+  },
+  {
+   "mint": "ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY",
+   "symbol": "MOODENG",
+   "category": "custom"
+  },
+  {
+   "mint": "8ncucXv6U6epZKHPbgaEBcEK399TpHGKCquSt4RnmX4f",
+   "symbol": "TRENCHER",
+   "category": "custom"
+  },
+  {
+   "mint": "Df6yfrKC8kZE3KNkrHERKzAetSxbrWeniQfyJY4Jpump",
+   "symbol": "CHILLGUY",
+   "category": "custom"
+  },
+  {
+   "mint": "degod39zqQWzpG6h4b7SJLLTCFE6FeZnZD8BwHBFxaN",
+   "symbol": "DEGOD",
+   "category": "custom"
+  },
+  {
+   "mint": "ATBR4i19gcQ31Rfr7ymA2XvkCQEAkNFGBtVKTmdqpump",
+   "symbol": "Machi",
+   "category": "custom"
+  },
+  {
+   "mint": "7NmbCaQpjpTcze5bmvWWJPjiaXMjHnLNYj9vJBG5pump",
+   "symbol": "BOBAOPPA",
+   "category": "custom"
+  },
+  {
+   "mint": "BPxxfRCXkUVhig4HS1Lh7kZqV6SPJhzfEk4x6fVBjPCy",
+   "symbol": "BP",
+   "category": "custom"
+  },
+  {
+   "mint": "FKNfAwb8TmjYkj11V4NiTz4TgrLWTWgm2NRwAD9epump",
+   "symbol": "TASSHUB",
+   "category": "custom"
+  },
+  {
+   "mint": "Dst93spXQEXxFzwYbFrQRnFYBYpw7AzB2QyALEeP4NGQ",
+   "symbol": "AFC",
+   "category": "custom"
+  },
+  {
+   "mint": "2dJniDEAGCG7zWKseCkyrML3W23WLjDf1CGxpNv3pump",
+   "symbol": "TURTLE",
+   "category": "custom"
+  },
+  {
+   "mint": "3iQL8BFS2vE7mww4ehAqQHAsbmRNCrPxizWAT2Zfyr9y",
+   "symbol": "VIRTUAL",
+   "category": "custom"
   },
   {
    "mint": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
-   "symbol": "WETH"
+   "symbol": "WETH",
+   "category": "custom"
+  },
+  {
+   "mint": "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+   "symbol": "RAY",
+   "category": "custom"
+  },
+  {
+   "mint": "DtR4D9FtVoTX2569gaL837ZgrB6wNjj6tkmnX9Rdk9B2",
+   "symbol": "aura",
+   "category": "custom"
+  },
+  {
+   "mint": "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC",
+   "symbol": "ai16z",
+   "category": "custom"
+  },
+  {
+   "mint": "H5b4iYiZYycr7fmQ1dMj7hdfLGAEPcDH261K4hugpump",
+   "symbol": "MONEROCHAN",
+   "category": "custom"
+  },
+  {
+   "mint": "METAwkXcqyXKy1AtsSgJ8JiUHwGCafnZL38n3vYmeta",
+   "symbol": "META",
+   "category": "custom"
+  },
+  {
+   "mint": "7BgBvyjrZX1YKz4oh9mjb8ZScatkkwb8DzFx7LoiVkM3",
+   "symbol": "Old Slerf",
+   "category": "custom"
+  },
+  {
+   "mint": "8m5hzX9hprtWwPuVZL4daCZfggWYKc6fhSJDDpiqpump",
+   "symbol": "Kirkslop",
+   "category": "custom"
+  },
+  {
+   "mint": "GJ9LEQZgoxW487LRaRnajr6DWzouswd29EruRqwZBAGS",
+   "symbol": "NIKITA",
+   "category": "custom"
+  },
+  {
+   "mint": "8rWNVQoFyhWgKfBQGo1o7va5imP9rYT9jNroDqN4pump",
+   "symbol": "OFFICIAL",
+   "category": "custom"
+  },
+  {
+   "mint": "GoLDppdjB1vDTPSGxyMJFqdnj134yH6Prg9eqsGDiw6A",
+   "symbol": "GOLD",
+   "category": "custom"
+  },
+  {
+   "mint": "6NwarBvDkXhByqVp2Qkq5i9XbtA2B3Bwe8SWGu9vpump",
+   "symbol": "Cupsey",
+   "category": "custom"
+  },
+  {
+   "mint": "HgBRWfYxEfvPhtqkaeymCQtHCrKE46qQ43pKe8HCpump",
+   "symbol": "Bert",
+   "category": "custom"
+  },
+  {
+   "mint": "2jvsWRkT17ofmv9pkW7ofqAFWSCNyJYdykJ7kPKbmoon",
+   "symbol": "AIR3",
+   "category": "custom"
+  },
+  {
+   "mint": "E5ZVeBMazQAYq4UEiSNRLxfMeRds9SKL31yPan7j5GJK",
+   "symbol": "LDZ",
+   "category": "custom"
+  },
+  {
+   "mint": "68GYUJW31GSJwLz44HGGQYaGXpG5iiWwYGiWxZ6apump",
+   "symbol": "chrome",
+   "category": "custom"
+  },
+  {
+   "mint": "72FkeF1cpBMtbordhTVNVbBGdaN5DfHcchstHwPWpump",
+   "symbol": "PUMPVILLE",
+   "category": "custom"
+  },
+  {
+   "mint": "4N4DnNo3qpPks9aQCkcWkzoir8tnvT6diS4TnnZibonk",
+   "symbol": "KITTY",
+   "category": "custom"
+  },
+  {
+   "mint": "7HgfXftRBBqsYtAEYcqjGLQrNJLL6Tww9ek4rE3Apump",
+   "symbol": "RKC",
+   "category": "custom"
+  },
+  {
+   "mint": "7XJiwLDrjzxDYdZipnJXzpr1iDTmK55XixSFAa7JgNEL",
+   "symbol": "MLG",
+   "category": "custom"
+  },
+  {
+   "mint": "H74CYmXgMkYHYuSRsZt6RJb4NYp2u72Vw8BS5huApump",
+   "symbol": "LMAO!",
+   "category": "custom"
+  },
+  {
+   "mint": "XSTuo1fV7HHMhs4BYiwtrWSLsMCJNrooH2AssWTYZqP",
+   "symbol": "XST",
+   "category": "custom"
+  },
+  {
+   "mint": "A13oRB9FFaiUjfi6LdCg6p9ka1u8SfGkUFs4SKvPpump",
+   "symbol": "TOAD",
+   "category": "custom"
+  },
+  {
+   "mint": "B5WTLaRwaUQpKk7ir1wniNB6m5o8GgMrimhKMYan2R6B",
+   "symbol": "Pepe",
+   "category": "custom"
+  },
+  {
+   "mint": "Eu8qFQrtyRdTLmjn42vnuVCY26fsZPSbkbyVo31t4xFJ",
+   "symbol": "RICKROLL",
+   "category": "custom"
+  },
+  {
+   "mint": "3fqify4QnaKFsvmFVqmLMUHaRKdiPki6w2H3GyDmpump",
+   "symbol": "Bark",
+   "category": "custom"
+  },
+  {
+   "mint": "KjtqAySqDkgu2hM1R29tkoFC2PsoPqoL6pH71jypump",
+   "symbol": "SAOF",
+   "category": "custom"
+  },
+  {
+   "mint": "x9341kuS6VLduD5TU7LvyMujsKazXUA2NwyGXVspump",
+   "symbol": "XST",
+   "category": "custom"
+  },
+  {
+   "mint": "35QsR6Spp224b3ksCL8gDqJGnD7qAzTYnh9MufHupump",
+   "symbol": "USUR",
+   "category": "custom"
+  },
+  {
+   "mint": "EY43xThsa2Gkb9fQDrHUPFCCpFJEeB1Qm2hxjupFpump",
+   "symbol": "MCX",
+   "category": "custom"
+  },
+  {
+   "mint": "Bb4jR951QtVjeFAYFLBYXDSMKjbTDroCLPbFLdd7pump",
+   "symbol": "memecoin",
+   "category": "custom"
+  },
+  {
+   "mint": "F8YVYJkmm4fRNUuRXM4sc7TyoKdbaRs4tXU4fX3Npump",
+   "symbol": "FF",
+   "category": "custom"
+  },
+  {
+   "mint": "EjD5Y9NVhXmtEqU7wYvAyZvDWZFQeEuHXFatJmTbpump",
+   "symbol": "lickingcat",
+   "category": "custom"
+  },
+  {
+   "mint": "4kjruqGHDsSqkMdFfCjV7Vb62HPFhtXyWc2t6JpQzDnz",
+   "symbol": "GTA6",
+   "category": "custom"
+  },
+  {
+   "mint": "6cFXKWPP2ckXppCBFZoPaJLBQf87UeVh8ryS9xYypump",
+   "symbol": "TOAD",
+   "category": "custom"
+  },
+  {
+   "mint": "nFECuAbErpG1xn7yxQtfCMUNAbCfTmkfFWyzgCrpump",
+   "symbol": "TOAD",
+   "category": "custom"
+  },
+  {
+   "mint": "AGkj8qQZJMBcpjcERqLuopmp6UPPYhzvavPdRHypump",
+   "symbol": "PATE",
+   "category": "custom"
+  },
+  {
+   "mint": "HFZCndQW9Keyhm3JaB5HtsyeThEjMcgt1yskghympump",
+   "symbol": "TOAD",
+   "category": "custom"
+  },
+  {
+   "mint": "aGLFVtcp5jArtthKCaaJWj9xGXZHQAMv27rsCDvpump",
+   "symbol": "TOAD",
+   "category": "custom"
+  },
+  {
+   "mint": "DsrbidPN1vEHMTZ5xytoxyCmkXQKmZmaAUyiADFpump",
+   "symbol": "CZ4",
+   "category": "custom"
+  },
+  {
+   "mint": "kXZidARCFKAtSvAd6zvjivEp8FobxKhgSNuDnx4pump",
+   "symbol": "SpaceX",
+   "category": "custom"
+  },
+  {
+   "mint": "Pb9xCuCGr5BGLj1c4uJZs2in8rn7GZV6sQVoWhjpump",
+   "symbol": "TikTok",
+   "category": "custom"
+  },
+  {
+   "mint": "FXcRRoYiAhi12NjqrXVmseZfabFSkesuT9ru6Smupump",
+   "symbol": "NVIDIA",
+   "category": "custom"
+  },
+  {
+   "mint": "eqQZhyLCkw4Ca5sRJKwZ9TLBS5j3Mg43zdZj68xpump",
+   "symbol": "DeepSeek",
+   "category": "custom"
+  },
+  {
+   "mint": "5nRGHJZ93pMKJo2ayCBxvKqWCsZKCbzQBrBave5xpump",
+   "symbol": "FROGOS",
+   "category": "custom"
+  },
+  {
+   "mint": "88SpBWrpbQ6MCdukVbtDBwRYYZAkv4KU4PYdG86ipump",
+   "symbol": "BULLWHALE",
+   "category": "custom"
+  },
+  {
+   "mint": "CAKRPCtdgRfQWjTCX1TnBbSfCeQXrH7RLWdpvhKpump",
+   "symbol": "UOTF",
+   "category": "custom"
+  },
+  {
+   "mint": "HoNA5xEiNAdC1pxP1u3KtQ93yDyXmZFhaS6tYycmpump",
+   "symbol": "Cap",
+   "category": "custom"
+  },
+  {
+   "mint": "GwD4C9dWrfEKMcKeF8NgdZAvn5BN8XduwU3R1eDpump",
+   "symbol": "NTFS",
+   "category": "custom"
+  },
+  {
+   "mint": "2nXcvq7h3jXCiug17V8hW4dfqwChtem4tMYmrDYUpump",
+   "symbol": "HOPE",
+   "category": "custom"
+  },
+  {
+   "mint": "CFD9c4SYrvyoroeH4eKRskmNYwGfd9kopErh74Rupump",
+   "symbol": "TOAD",
+   "category": "custom"
+  },
+  {
+   "mint": "7LA4wwjoXU4hAdwX1eT5ouuSsMrHq9wHQBfAyPfJK1eQ",
+   "symbol": "CLANKER",
+   "category": "custom"
+  },
+  {
+   "mint": "HxQhDGYqyjorgogMJx7YbBHADEDxuHhLnMMmr6VYpyn",
+   "symbol": "MANLET",
+   "category": "custom"
+  },
+  {
+   "mint": "32CdQdBUxbCsLy5AUHWmyidfwhgGUr9N573NBUrDpump",
+   "symbol": "maxxing",
+   "category": "custom"
+  },
+  {
+   "mint": "Dx68jydZnXJkp6Xngku8FbjFFovp9tZmXT66jrLXpump",
+   "symbol": "TEB",
+   "category": "custom"
+  },
+  {
+   "mint": "6kDhQghfw5GLUVx6uK6tA5zs9jTwACE17d7ahh6ZVsqu",
+   "symbol": "dolan",
+   "category": "custom"
+  },
+  {
+   "mint": "EeB76LHyVZPMRvTpLcxJqqfSz4gg9f9XgsUmFybcpump",
+   "symbol": "sling",
+   "category": "custom"
+  },
+  {
+   "mint": "43VWkd99HjqkhFTZbWBpMpRhjG469nWa7x7uEsgSH7We",
+   "symbol": "STNK",
+   "category": "custom"
   },
   {
    "mint": "NBiSF3UaVUFtRzHwAfxyHsBCAZWGEKnMpewAE4oh7BG",
-   "symbol": "NBIS"
+   "symbol": "NBIS",
+   "category": "backpack"
+  },
+  {
+   "mint": "4S2qS8P17LSPosME8grirgfUE4p6kW2kZfMSzgmDpump",
+   "symbol": "DOT",
+   "category": "custom"
+  },
+  {
+   "mint": "5XyKkFaJpAmsH4Tf2EFj3S61W3hC5cJhxNZQQ5h1pump",
+   "symbol": "Luigi",
+   "category": "custom"
+  },
+  {
+   "mint": "8uFpKxenGXbnb5Jxjh3sPdKKTVM2F4EfQZYhjZEfpump",
+   "symbol": "BOT",
+   "category": "custom"
+  },
+  {
+   "mint": "HukaK2eHhbTyiuUwuKMntjPJP4aGdD4VwiExsNmyT8WJ",
+   "symbol": "BOT",
+   "category": "custom"
+  },
+  {
+   "mint": "tSEakxwRz3Y3BpjDttokygCgScgLnui19NJGrR4pump",
+   "symbol": "Lucifer",
+   "category": "custom"
+  },
+  {
+   "mint": "CX2v7JSHJQDcNooubzzvZG8TPaDwbaPgfzcXRSWJpump",
+   "symbol": "MARIO64",
+   "category": "custom"
+  },
+  {
+   "mint": "CmQJNJ185pjzQoebPbcqZu1kTykHxJbn4gER1Af7pump",
+   "symbol": "REX",
+   "category": "custom"
+  },
+  {
+   "mint": "8NoNPSYcFq4jdYTqX4rMLpQR3GoBe6XvPYkRDERwpump",
+   "symbol": "BOT",
+   "category": "custom"
+  },
+  {
+   "mint": "2zCo6bUowJMvr89ajxuWsPadAqJ2F9akCkxumNsSdgsL",
+   "symbol": "XBTC",
+   "category": "leverage"
+  },
+  {
+   "mint": "GCa9TZMK9Q3VUSkhZgX76YAQBjqQd1dPxkBnZojFpump",
+   "symbol": "Plumber",
+   "category": "custom"
+  },
+  {
+   "mint": "FfJ6PPxbDHJHbRWE2zXTRqKu2PhahpxXnhuKxiXEpump",
+   "symbol": "USCR",
+   "category": "custom"
+  },
+  {
+   "mint": "6ogzHhzdrQr9Pgv6hZ2MNze7UrzBMAFyBBWUYp1Fhitx",
+   "symbol": "RETARDIO",
+   "category": "custom"
+  },
+  {
+   "mint": "4FdojUmXeaFMBG6yUaoufAC5Bz7u9AwnSAMizkx5pump",
+   "symbol": "core",
+   "category": "custom"
+  },
+  {
+   "mint": "CcLd8HTAKLWtQHatqPwBQjtuCA72FNB9E1ckRTEzpump",
+   "symbol": "ALTSZN",
+   "category": "custom"
+  },
+  {
+   "mint": "86KR6eG2VuNntLBi23SAYFW1cXkiYcwxGJd746rqcUAG",
+   "symbol": "MIM",
+   "category": "custom"
+  },
+  {
+   "mint": "BiYu1Lx12rQjNsvo4zeg85cuWJG5RvkL63AqZSGnTtu",
+   "symbol": "DIP",
+   "category": "custom"
+  },
+  {
+   "mint": "3S8qX1MsMqRbiwKg2cQyx7nis1oHMgaCuc9c4VfvVdPN",
+   "symbol": "MOTHER",
+   "category": "custom"
+  },
+  {
+   "mint": "hf34pZHnV4entu9bdp4pFEmeKpivEUeSUhASgWopump",
+   "symbol": "MUMU",
+   "category": "custom"
+  },
+  {
+   "mint": "GzrN3MUCcfP4s3HfiYXrkFsQgvuSzbQ7326tU3fTfwZd",
+   "symbol": "Benny",
+   "category": "custom"
+  },
+  {
+   "mint": "EUB1eZBt4m3X4FbperWnKGJdvLsuLMu2YmJix5yjpump",
+   "symbol": "K-HOME",
+   "category": "custom"
+  },
+  {
+   "mint": "AhSkPctV3gYxkEvPm4fxvieYgYyQA8p8xqXviP4mpump",
+   "symbol": "CALL",
+   "category": "custom"
+  },
+  {
+   "mint": "GDPtXowyiXHjsHXgkwM1erpFufPEeNvqK8iGq71Bpump",
+   "symbol": "Niles",
+   "category": "custom"
+  },
+  {
+   "mint": "38PgzpJYu2HkiYvV8qePFakB8tuobPdGm2FFEn7Dpump",
+   "symbol": "gork",
+   "category": "custom"
   },
   {
    "mint": "SiLVFMgD3eD2rgK628NbTBq9MnuJF5FW2CRaVyTB35L",
-   "symbol": "SILVER"
+   "symbol": "SILVER",
+   "category": "backpack"
+  },
+  {
+   "mint": "6zjLjqd483pWwrowtKdyhie8tqEvkWwRcrR4btkVpump",
+   "symbol": "expensive",
+   "category": "custom"
+  },
+  {
+   "mint": "4CmYEygEusR76TpjxUbTjSLjyDbCMjxKhRKNozkrpump",
+   "symbol": "BOB",
+   "category": "custom"
+  },
+  {
+   "mint": "CrJPSvj625TnPdWS42aG5ybMcHeFvnNqq5AExVespump",
+   "symbol": "Momota",
+   "category": "custom"
+  },
+  {
+   "mint": "Hyauszv6z27sFLFkara1br2dQ4ZVJx7gkppv9pi3pump",
+   "symbol": "GEOM",
+   "category": "custom"
+  },
+  {
+   "mint": "2ASwAoHBbdBUbNTqDxiaGpvmkJRWTFQcxbB6S73dpump",
+   "symbol": "utility",
+   "category": "custom"
+  },
+  {
+   "mint": "FK7nFZyuRELUsgWHCCpJASvoiu8Jub7iTd7o8Xxvpump",
+   "symbol": "FUN",
+   "category": "custom"
+  },
+  {
+   "mint": "7M9KJcPNC65ShLDmJmTNhVFcuY95Y1VMeYngKgt67D1t",
+   "symbol": "r/snoofi",
+   "category": "custom"
+  },
+  {
+   "mint": "5BQpi43RtPxsw7jw3dpeE7duQAXcNYhw9MD6KUxGpump",
+   "symbol": "Chibi",
+   "category": "custom"
+  },
+  {
+   "mint": "A48KeWUuiDSdRQBqAFssgyYATDuBv7cer54V2JSDpump",
+   "symbol": "CALLOOOR",
+   "category": "custom"
+  },
+  {
+   "mint": "GRehQKv9E3fVuNJGQTwAAjYpcixRCYKkzAXAb5kGpump",
+   "symbol": "BOI\u00c3\u0161NA",
+   "category": "custom"
+  },
+  {
+   "mint": "GPzpoXpD74E2C4CJNayuoyBqPQJEsPtdse3nhntrpump",
+   "symbol": "LOOKSMAX",
+   "category": "custom"
+  },
+  {
+   "mint": "4hfye6h74Nrm2HMEhQxWyBwWJZHJHRNTEf9vnbfwpump",
+   "symbol": "TOILET",
+   "category": "custom"
+  },
+  {
+   "mint": "4BGQv1YJSDas6NjAkQoLGCFyZBBDtUb9Xg2V8c1Hpump",
+   "symbol": "ANSEM",
+   "category": "custom"
+  },
+  {
+   "mint": "BfFAisgK8Np12kxZj73rnw1srMjXtBK3B1PeYJ1ppump",
+   "symbol": "CHROME",
+   "category": "custom"
+  },
+  {
+   "mint": "Fa7ZE9nCEYnrHsnoeHuhEExJpchtrBtKXnWe6CgHpump",
+   "symbol": "$MAD",
+   "category": "custom"
+  },
+  {
+   "mint": "9jaZhJM6nMHTo4hY9DGabQ1HNuUWhJtm7js1fmKMVpkN",
+   "symbol": "AMC",
+   "category": "custom"
+  },
+  {
+   "mint": "H3EKcm3BayFEXgBo1njpg3v6FhSUr1FRyQRfuJVYpump",
+   "symbol": "stonkbot",
+   "category": "custom"
+  },
+  {
+   "mint": "B8RHrVBxSjBGKqAbn1tXo6CWjvt5jFkkqjbCZtuDpump",
+   "symbol": "DUSD",
+   "category": "custom"
+  },
+  {
+   "mint": "HfMbPyDdZH6QMaDDUokjYCkHxzjoGBMpgaUvpLWGbF5p",
+   "symbol": "PBTC",
+   "category": "custom"
+  },
+  {
+   "mint": "CPLTbYbtDMKZtHBaPqdDmHjxNwESCEB14gm6VuoDpump",
+   "symbol": "DTV",
+   "category": "custom"
+  },
+  {
+   "mint": "9AvytnUKsLxPxFHFqS6VLxaxt5p6BhYNr53SD2Chpump",
+   "symbol": "67",
+   "category": "custom"
+  },
+  {
+   "mint": "8J69rbLTzWWgUJziFY8jeu5tDwEPBwUz4pKBMr5rpump",
+   "symbol": "WOJAK",
+   "category": "custom"
+  },
+  {
+   "mint": "ACtfUWtgvaXrQGNMiohTusi5jcx5RJf5zwu9aAxkpump",
+   "symbol": "unc",
+   "category": "custom"
+  },
+  {
+   "mint": "EeSHyt1ahSvm91CSa8ASqvenmxxQn2WU5VeNhdmepump",
+   "symbol": "GYM",
+   "category": "custom"
+  },
+  {
+   "mint": "73jj6SFe9FKn6qqpaGwbSd7TL1sHheh3HqDo9RwA7BHB",
+   "symbol": "Pork",
+   "category": "custom"
+  },
+  {
+   "mint": "CAGtwKrcnwgLABdg5o16oMczxUV6i1pj973K9XWQpump",
+   "symbol": "Gringott",
+   "category": "custom"
+  },
+  {
+   "mint": "CdAH7BSRD7qNeZFA2Rbm4KATL45ko793hPxxAixUpump",
+   "symbol": "pep",
+   "category": "custom"
+  },
+  {
+   "mint": "GYKmdfcUmZVrqfcH1g579BGjuzSRijj3LBuwv79rpump",
+   "symbol": "wDOG",
+   "category": "custom"
+  },
+  {
+   "mint": "y1AZt42vceCmStjW4zetK3VoNarC1VxJ5iDjpiupump",
+   "symbol": "FARTBOY",
+   "category": "custom"
+  },
+  {
+   "mint": "Am8iBffqgaedfdK5XhtorbcRrKzwH9nyL3ySikQfpump",
+   "symbol": "Kimchi",
+   "category": "custom"
+  },
+  {
+   "mint": "6AJcP7wuLwmRYLBNbi825wgguaPsWzPBEHcHndpRpump",
+   "symbol": "VINE",
+   "category": "custom"
+  },
+  {
+   "mint": "GvQH1VGGbrjeRSbsCreptYN4GUcZ9w7vMFJ5ic8ypump",
+   "symbol": "wiener",
+   "category": "custom"
+  },
+  {
+   "mint": "BDdzUjksj1J4bSnMveQ5tV9Up8A9c6YS1tHrxNw3pump",
+   "symbol": "FOMO",
+   "category": "custom"
+  },
+  {
+   "mint": "H3f4jYE3tEY8JWve2tRJYzqZpAHEHPihJkGQA5BCqqkn",
+   "symbol": "FOMO",
+   "category": "custom"
+  },
+  {
+   "mint": "6mLmo53cpNy8PkSXt1XTVTF8CvJj466ea3bbhZqMpump",
+   "symbol": "se",
+   "category": "custom"
+  },
+  {
+   "mint": "GHichsGq8aPnqJyz6Jp1ASTK4PNLpB5KrD6XrfDjpump",
+   "symbol": "$1",
+   "category": "custom"
+  },
+  {
+   "mint": "EkcTa8n14fXcHdfvZqCg72cTCutJnnKb19vcHwKTpump",
+   "symbol": "Qenis",
+   "category": "custom"
+  },
+  {
+   "mint": "9BVn3Y8tPghbnGuuuxoj2mGekqgSQV1M7nALF7brpump",
+   "symbol": "NYAN",
+   "category": "custom"
+  },
+  {
+   "mint": "6hxu7BY4mRChLovDjc1ML3wpizv86dP3fA7Jn5wDZ4SS",
+   "symbol": "HOBBES",
+   "category": "custom"
+  },
+  {
+   "mint": "FhwV2wZicstWLnULi7dXZYaCRRv17AtQ9RcmJSngpump",
+   "symbol": "Stickman",
+   "category": "custom"
+  },
+  {
+   "mint": "BAQPhMtf6UaXMdEwZLu1BVTSxRz9AYZkkb8FQXncpump",
+   "symbol": "CALICO",
+   "category": "custom"
+  },
+  {
+   "mint": "4xMegMRMd2TFQEXxv39vtMP1r5fFVuA7VcaSmAhLpump",
+   "symbol": "GUNICORN",
+   "category": "custom"
+  },
+  {
+   "mint": "C4j7kPx9PqDnfvxe2uycJQRTAeyGwmU4DyGf21Xgpump",
+   "symbol": "MD",
+   "category": "custom"
+  },
+  {
+   "mint": "DTGWeDVPAvr7TdY7sdbfjz2bi4QihVMMn9KhyKH1pump",
+   "symbol": "WOFL",
+   "category": "custom"
+  },
+  {
+   "mint": "5dpN5wMH8j8au29Rp91qn4WfNq6t6xJfcjQNcFeDJ8Ct",
+   "symbol": "SANA",
+   "category": "custom"
+  },
+  {
+   "mint": "9sfCHMLWSVy6MD6zr7pR1gD3qbT7C6K1E3dMf2ZBpump",
+   "symbol": "LAYOOO",
+   "category": "custom"
   },
   {
    "mint": "5XZw2LKTyrfvfiskJ78AMpackRjPcyCif1WhUsPDuVqQ",
-   "symbol": "WBTC"
+   "symbol": "WBTC",
+   "category": "custom"
+  },
+  {
+   "mint": "61Wj56QgGyyB966T7YsMzEAKRLcMvJpDbPzjkrCZc4Bi",
+   "symbol": "COPPERINU",
+   "category": "custom"
+  },
+  {
+   "mint": "9oMa91M32dG8pCWuyvZuMNxtMj7xBjxAuMXex9ZTpump",
+   "symbol": "TripleP",
+   "category": "custom"
+  },
+  {
+   "mint": "GnwoFdLNPZw9etvTAxPstSvQNHA5msqiQLNU9U78pump",
+   "symbol": "RADON",
+   "category": "custom"
+  },
+  {
+   "mint": "BD81TKATxfYcCK1rw1uZBSWC9Yk3nJEFiRsnHpi6pump",
+   "symbol": "GOLDDIGGER",
+   "category": "custom"
+  },
+  {
+   "mint": "RmtMAYVTTFv2iK9muMrXEoAnSSsZPPgRPbqZCKwNDYk",
+   "symbol": "EYE",
+   "category": "custom"
+  },
+  {
+   "mint": "HJvNXZ64yZeB2aZWyFEP7D35W8eRLfLDcbfUKRyHpump",
+   "symbol": "CASHAPP",
+   "category": "custom"
+  },
+  {
+   "mint": "fRfKGCriduzDwSudCwpL7ySCEiboNuryhZDVJtr1a1C",
+   "symbol": "DUPE",
+   "category": "custom"
+  },
+  {
+   "mint": "ucBaqBtYRuxKciy91wGx4iJtHvCwxU48ehwRDxFpump",
+   "symbol": "UOTF",
+   "category": "custom"
+  },
+  {
+   "mint": "5DQwhyBRkjSyEZDCRqsvfA1n8BnDcJAHpxy6EokQjcra",
+   "symbol": "MRNA",
+   "category": "custom"
+  },
+  {
+   "mint": "FtXH4AAgR8KMBR8zDfTfHnYdSStw2Am3iwq8TpoHpump",
+   "symbol": "Intismeran",
+   "category": "custom"
+  },
+  {
+   "mint": "CreiuhfwdWCN5mJbMJtA9bBpYQrQF2tCBuZwSPWfpump",
+   "symbol": "PYTHIA",
+   "category": "custom"
+  },
+  {
+   "mint": "8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn",
+   "symbol": "ZEREBRO",
+   "category": "custom"
+  },
+  {
+   "mint": "ApZuxdpzMrbEYTGEzeY9afh5pj9d6qPRJCTgQYiipbKg",
+   "symbol": "CYBERLEEK",
+   "category": "custom"
   },
   {
    "mint": "MRNAzXzhNcaEXJPibHEn8cd4vyekCDiivTyEwswLUCT",
-   "symbol": "MRNA"
+   "symbol": "MRNA",
+   "category": "backpack"
+  },
+  {
+   "mint": "C2omVhcvt3DDY77S2KZzawFJQeETZofgZ4eNWWkXpump",
+   "symbol": "BULLISH",
+   "category": "custom"
+  },
+  {
+   "mint": "DitHyRMQiSDhn5cnKMJV2CDDt6sVct96YrECiM49pump",
+   "symbol": "House",
+   "category": "custom"
+  },
+  {
+   "mint": "2wMTr4ZttVr5tmS4wLStee59wi8f9QQfMtT2Hoispump",
+   "symbol": "GTA",
+   "category": "custom"
+  },
+  {
+   "mint": "a3W4qutoEJA4232T2gwZUfgYJTetr96pU4SJMwppump",
+   "symbol": "WhiteWhale",
+   "category": "custom"
   },
   {
    "mint": "LLYuwZ33keFihgwoxXsBawy31AiRFLFSva32TYq5TvD",
-   "symbol": "LLY"
+   "symbol": "LLY",
+   "category": "backpack"
+  },
+  {
+   "mint": "DWrrbYP65oo33Fk83iaQVHQhytntFM1uooyJHjaxpump",
+   "symbol": "CEZ",
+   "category": "custom"
+  },
+  {
+   "mint": "FMqh9mqR6drPZqqW6wPqLHxX4rqNDWGhYLaMfoaJpump",
+   "symbol": "world",
+   "category": "custom"
+  },
+  {
+   "mint": "4vqind26DsicHecdGyrjYc4yhQN9HtyfzJ3d1ouppump",
+   "symbol": "dildo",
+   "category": "custom"
+  },
+  {
+   "mint": "2hXHY3DnN7HUGySZEmBsLFKSqLB8nj3aE8wwq44wpump",
+   "symbol": "LIZARD",
+   "category": "custom"
+  },
+  {
+   "mint": "HCuVcM4Q3GxQhme8EYd3QX8cvqz1j13oB43Wv3LAwESh",
+   "symbol": "MCSQUASH",
+   "category": "custom"
+  },
+  {
+   "mint": "461C1ngHZtzTvMWT8gL7C2JLaYg2VQvaYj8aDFqhEni1",
+   "symbol": "Link",
+   "category": "custom"
+  },
+  {
+   "mint": "EjAuFtMEP6LQDgLb11JU9bkcskhFYbgd9Q5NRXJppump",
+   "symbol": "Doge2",
+   "category": "custom"
+  },
+  {
+   "mint": "EpXtn6xGoZ4Y45vRjiDUHSCGbBoJD5FaEqZbF98YswH1",
+   "symbol": "MADE",
+   "category": "custom"
+  },
+  {
+   "mint": "zGh48JtNHVBb5evgoZLXwgPD2Qu4MhkWdJLGDAupump",
+   "symbol": "retire",
+   "category": "custom"
+  },
+  {
+   "mint": "Ga5ErptAQ5oHwB7G195UEq9FeJ5UNDoV9SCRCpebFeG7",
+   "symbol": "REDACTED",
+   "category": "custom"
+  },
+  {
+   "mint": "3d1qHSAkQhoN7kN1C6tvpAArCkXWxwYdBng6taXCDM6u",
+   "symbol": "RTM",
+   "category": "custom"
+  },
+  {
+   "mint": "4978aTN9W3CDuUREGxAQaBYqhPXt8142N4o4Sfgzpump",
+   "symbol": "YOMOGI",
+   "category": "custom"
+  },
+  {
+   "mint": "2GXmB95pGD3pHV4mzNq7YsmyiEmVYWQLptbwYqgdpump",
+   "symbol": "WNTV",
+   "category": "custom"
+  },
+  {
+   "mint": "69kdRLyP5DTRkpHraaSZAQbWmAwzF9guKjZfzMXzcbAs",
+   "symbol": "USA",
+   "category": "custom"
+  },
+  {
+   "mint": "6yjNqPzTSanBWSa6dxVEgTjePXBrZ2FoHLDQwYwEsyM6",
+   "symbol": "Chud",
+   "category": "custom"
+  },
+  {
+   "mint": "B4iCqVsAZv9dBiBVv58GJiBxWGmwkwbtPTn4sUQTpump",
+   "symbol": "Polycat",
+   "category": "custom"
+  },
+  {
+   "mint": "3gzVghdiQkpaFrYTtcrLDq9mV4tWBixPuXP5JsWRpump",
+   "symbol": "BoysClub",
+   "category": "custom"
+  },
+  {
+   "mint": "GUmbtfjSZkybSFgPibBcvwExEBdXwewJHR5PkTjzpump",
+   "symbol": "Morty",
+   "category": "custom"
+  },
+  {
+   "mint": "GodL6KZ9uuUoQwELggtVzQkKmU1LfqmDokPibPeDKkhF",
+   "symbol": "GODL",
+   "category": "custom"
+  },
+  {
+   "mint": "HtTYHz1Kf3rrQo6AqDLmss7gq5WrkWAaXn3tupUZbonk",
+   "symbol": "KORI",
+   "category": "custom"
+  },
+  {
+   "mint": "39fNg98hhpyiRTGD8Gf8y5MwFVgJJZEnDyTMKdDZpump",
+   "symbol": "SEYONGPARK",
+   "category": "custom"
+  },
+  {
+   "mint": "DMUzXdincSucnKTMLtVFBCBcAwuNehoqyrmbYi5hpump",
+   "symbol": "happyseb",
+   "category": "custom"
+  },
+  {
+   "mint": "FZqdw6oSDCbHtKYxmhnfbi97SnyVy8jaYpdCoMrrjKa2",
+   "symbol": "Pistacio",
+   "category": "custom"
+  },
+  {
+   "mint": "FzJ1Cm4kwEjiPmfna8WXWwjC7i41KnB9oi9wz3nHpump",
+   "symbol": "Frug",
+   "category": "custom"
+  },
+  {
+   "mint": "7nLukVng5teXze14rum9v57juXLjUp7JJnCveko1pump",
+   "symbol": "Martians",
+   "category": "custom"
+  },
+  {
+   "mint": "SV151D5pjygAKA8aJJcKzm4wFnRX5G92Fye94jQJk7g",
+   "symbol": "SV151",
+   "category": "collectible"
+  },
+  {
+   "mint": "J7tYmq2JnQPvxyhcXpCDrvJnc9R5ts8rv7tgVHDPsw7U",
+   "symbol": "FLOYDAI",
+   "category": "custom"
+  },
+  {
+   "mint": "CTPoyCwkjMvoJwU4xvZZqoD8tiYk6yDchySiN5gGpump",
+   "symbol": "fone",
+   "category": "custom"
+  },
+  {
+   "mint": "7hGgx1VtNTj193fFXXuMEkp1MRV6JbWYgMBhHRYxaxu2",
+   "symbol": "FRIES",
+   "category": "custom"
   },
   {
    "mint": "MRVLSjkR2ceUBukujaD3xCyHP1H3B2SzpsNTZF546jo",
-   "symbol": "MRVL"
+   "symbol": "MRVL",
+   "category": "backpack"
+  },
+  {
+   "mint": "HeeBovJNKd27tQ6xkeP1dfSyTr8LyLwhJz9wfFTbPLEX",
+   "symbol": "HEEBOO",
+   "category": "collectible"
+  },
+  {
+   "mint": "7n8kRipxAQBfpGQtcGA2AbkM2HASSVCzqZ5F3QEopump",
+   "symbol": "Zoe",
+   "category": "custom"
+  },
+  {
+   "mint": "zj1jpp7QMveWHLs61vL9KMZf254KvW7j4AAmBF8ry2k",
+   "symbol": "BULLSHIT",
+   "category": "custom"
+  },
+  {
+   "mint": "MukLDtJ8Cx9DxLbeyLRSWPSposTMWuwHANbuaudpump",
+   "symbol": "OTC",
+   "category": "custom"
+  },
+  {
+   "mint": "AVBN6kXdaw27ySuvMevKYzNTL8d39b7sGQFDCmsvpump",
+   "symbol": "PINK",
+   "category": "custom"
+  },
+  {
+   "mint": "67iVaRRQkNnZvN29rG75kt71nVdhkc5imwYDTivApump",
+   "symbol": ".exe",
+   "category": "custom"
+  },
+  {
+   "mint": "92G6qAymyDNQe4kaBoB9h2fz6mzsYJrEV3T5BetZpump",
+   "symbol": "TIT",
+   "category": "custom"
+  },
+  {
+   "mint": "HQKhWkrPtdLyRxWGVZAajfxoja2y8FMJeckKqZEFpump",
+   "symbol": "OPTIMUS",
+   "category": "custom"
+  },
+  {
+   "mint": "4pnj9L8C1uJDhECSTHkToKHPmjLRfdSunENs2xtKpump",
+   "symbol": "inuzard",
+   "category": "custom"
+  },
+  {
+   "mint": "35M9BcmFRQ86TnmoFMfUmteZrQrmUm2n7ZiV5gacpump",
+   "symbol": "trumponfone",
+   "category": "custom"
   },
   {
    "mint": "5eyib4qghYGHNh7VvxSFGYLFJSanjq9hug9fR52kksnm",
-   "symbol": "PSG"
+   "symbol": "PSG",
+   "category": "backpack"
+  },
+  {
+   "mint": "Aigf5pKPyZW8nzxCrHEisE4tZMiUhFpKie8mYE7cmj6c",
+   "symbol": "NVDGE",
+   "category": "custom"
+  },
+  {
+   "mint": "TRUEq13uwehY57S1Y62iTxas7ahpFgohc8kScbGNu1h",
+   "symbol": "STACY",
+   "category": "custom"
+  },
+  {
+   "mint": "2wzVMXhLypmP92mXNCq4fuFcd9TCC972AbMfuiH3pump",
+   "symbol": "AISLOP",
+   "category": "custom"
+  },
+  {
+   "mint": "7MYegHoqDGhWdvrnxeuiAEndgG6qcs1N3W5v6SXspump",
+   "symbol": "Buddy",
+   "category": "custom"
+  },
+  {
+   "mint": "aTUfRuPj3tp7FEpzAXLjs4VnQgAFbExD5JHGTyvpump",
+   "symbol": "SFM",
+   "category": "custom"
+  },
+  {
+   "mint": "5SVG3T9CNQsm2kEwzbRq6hASqh1oGfjqTtLXYUibpump",
+   "symbol": "SIGMA",
+   "category": "custom"
+  },
+  {
+   "mint": "ECcsXjJpdhB1pdX3SK9yc6k5a2UrScaY3LKc7q6Tpump",
+   "symbol": "pixeldog",
+   "category": "custom"
+  },
+  {
+   "mint": "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
+   "symbol": "SKR",
+   "category": "solana"
   },
   {
    "mint": "poNSfquKq512ApeYjVghwViSun4x1MhCqHVH2Paq4jN",
-   "symbol": "PONS"
+   "symbol": "PONS",
+   "category": "backpack"
+  },
+  {
+   "mint": "BKXtSJWJk8s6DGEv71a3HohqHMhzn1iXLAzxMm6ZXjmy",
+   "symbol": "GPRO",
+   "category": "custom"
+  },
+  {
+   "mint": "XsfCC9VL4DamVGNgdJpfLXB3sBVa158Gbx8sh7NzmTk",
+   "symbol": "VIDAX",
+   "category": "xstock"
+  },
+  {
+   "mint": "8K5X85PAJHAAVSvYaAzgVPPAPsqqHmvx16ZyBiscYF8L",
+   "symbol": "CTO",
+   "category": "custom"
+  },
+  {
+   "mint": "4Hcm1TfA1MvVhCQHvJCcKL7ymUhJZAV7P439H5ZHnKRh",
+   "symbol": "test",
+   "category": "custom"
+  },
+  {
+   "mint": "3oY5NnNAbnRK4eNzPWZFmtAWVW4RNumpni4XtGarpump",
+   "symbol": "Mobi",
+   "category": "custom"
+  },
+  {
+   "mint": "AjdE84dGqhbqDYhh8Pm8oCRMCTpUGQ4oDaRBF5vwpump",
+   "symbol": "GPRO",
+   "category": "custom"
   },
   {
    "mint": "GPRR2u6NS5yBQHWGauoJ9HXgjrTH8dDsrBfTV5zAYvDH",
-   "symbol": "GPRO"
+   "symbol": "GPRO",
+   "category": "backpack"
+  },
+  {
+   "mint": "3DV5zVYWVkmJrdi2t7uziUuo4ybdtaLxxFPSNs1fXUjp",
+   "symbol": "SNP500",
+   "category": "custom"
+  },
+  {
+   "mint": "3vgopg7xm3EWkXfxmWPUpcf7g939hecfqg18sLuXDzVt",
+   "symbol": "HAROLD",
+   "category": "custom"
+  },
+  {
+   "mint": "ANM35KbUcfKdEVBXzSjZBoT6ceSwYRs3fuc79fp7kRqP",
+   "symbol": "Pumpcat",
+   "category": "custom"
+  },
+  {
+   "mint": "FMpbX9EBjGUgjeUZMmvzTMuu8ZViZJMNsAwQBKGXpump",
+   "symbol": "BUSINESS",
+   "category": "custom"
+  },
+  {
+   "mint": "7V6Sk63y8Rr1MvcN5mYNp61wgFhy4EeQg5gUASk9pump",
+   "symbol": "HBULL",
+   "category": "custom"
+  },
+  {
+   "mint": "CgypxZcmmZMVQMERA6D59hkh8maPEnj31pYRKM9cpump",
+   "symbol": "DICKBUTT",
+   "category": "custom"
+  },
+  {
+   "mint": "8Jx8AAHj86wbQgUTjGuj6GTTL5Ps3cqxKRTvpaJApump",
+   "symbol": "PENGUIN",
+   "category": "custom"
+  },
+  {
+   "mint": "CbyTNf7UPzvewHh4Zp6umogM2RWahhmGRJWLJnPwpump",
+   "symbol": "biketyson",
+   "category": "custom"
+  },
+  {
+   "mint": "GMvCfcZg8YvkkQmwDaAzCtHDrrEtgE74nQpQ7xNabonk",
+   "symbol": "1",
+   "category": "custom"
+  },
+  {
+   "mint": "8wXtPeU6557ETkp9WHFY1n1EcU6NxDvbAggHGsMYiHsB",
+   "symbol": "GME",
+   "category": "custom"
+  },
+  {
+   "mint": "EEpng77ZPn9FbgbT4xsRjwuxNCcMBYq3HTwEscyTpump",
+   "symbol": "HeeHaw",
+   "category": "custom"
+  },
+  {
+   "mint": "9CzNGAEutxKHJ5CwYC5Lk8X8YzgYrQnvKChP2BFEpump",
+   "symbol": "MEMES",
+   "category": "custom"
+  },
+  {
+   "mint": "RNrjv3M2hBciaNyYTZD6xKRKivgoZJLQ9Hs9nd8pump",
+   "symbol": "AMC",
+   "category": "custom"
   },
   {
    "mint": "AMC1qwR9KhiyrQBRPrxnfo4JfMeMZqEBvt5tgTytNNoc",
-   "symbol": "AMC"
+   "symbol": "AMC",
+   "category": "backpack"
+  },
+  {
+   "mint": "8wxkvAfEns76yBzu4MnbV7VnXWjg3iDPA9uwAQ6cpump",
+   "symbol": "SOLANGELES",
+   "category": "custom"
+  },
+  {
+   "mint": "5Yy9JAGfh7ZN2ihRNYqkd3um929XJM1WR3CD2THsiWTG",
+   "symbol": "BONKGUY",
+   "category": "custom"
+  },
+  {
+   "mint": "Eg2ymQ2aQqjMcibnmTt8erC6Tvk9PVpJZCxvVPJz2agu",
+   "symbol": "PUMPCADE",
+   "category": "custom"
+  },
+  {
+   "mint": "CGEDT9QZDvvH5GmVkWJH2BXiMJqMJySC9ihWyr7Spump",
+   "symbol": "BURNIE",
+   "category": "custom"
+  },
+  {
+   "mint": "9999FVbjHioTcoJpoBiSjpxHW6xEn3witVuXKqBh2RFQ",
+   "symbol": "SLERF",
+   "category": "custom"
+  },
+  {
+   "mint": "CTg3ZgYx79zrE1MteDVkmkcGniiFrK1hJ6yiabropump",
+   "symbol": "NEIRO",
+   "category": "custom"
+  },
+  {
+   "mint": "AMjzRn1TBQwQfNAjHFeBb7uGbbqbJB7FzXAnGgdFPk6K",
+   "symbol": "SOLCEX",
+   "category": "custom"
+  },
+  {
+   "mint": "GtDZKAqvMZMnti46ZewMiXCa4oXF4bZxwQPoKzXPFxZn",
+   "symbol": "nub",
+   "category": "custom"
+  },
+  {
+   "mint": "Hos282xmdMJHwMjhni91fNqdjDsgWjgSckxuGc1Bpump",
+   "symbol": "Token",
+   "category": "custom"
+  },
+  {
+   "mint": "BSqMUYb6ePwKsby85zrXaDa4SNf6AgZ9YfA2c4mZpump",
+   "symbol": "LOOK",
+   "category": "custom"
+  },
+  {
+   "mint": "5PwsE1yXAvANamqbYwM6zoWrYkNw8RZ74TZSsxnGu4vq",
+   "symbol": "black",
+   "category": "custom"
+  },
+  {
+   "mint": "6UGNg119LV6YjSCQ5K6Z6jsLLLetpMJ1vPdhiU8qpump",
+   "symbol": "CURB",
+   "category": "custom"
+  },
+  {
+   "mint": "CDBdbNqmrLu1PcgjrFG52yxg71QnFhBZcUE6PSFdbonk",
+   "symbol": "LetsBONK",
+   "category": "custom"
+  },
+  {
+   "mint": "H2c31USxu35MDkBrGph8pUDUnmzo2e4Rf4hnvL2Upump",
+   "symbol": "Shoggoth",
+   "category": "custom"
+  },
+  {
+   "mint": "3sSbDu4q4rfKirh7k1gTNteMJaDQYWUSbgJ5dTXXpump",
+   "symbol": "Tony",
+   "category": "custom"
+  },
+  {
+   "mint": "Hh3oTaqDCKKfdBgsQEvxp9sUwyNf8x9qmKqEMLBWpump",
+   "symbol": "HODL",
+   "category": "custom"
   },
   {
    "mint": "taoC6xyv2v8tDLcev4uaGUgV4vdQsWJrGft2kcBRrBY",
-   "symbol": "TAO"
+   "symbol": "TAO",
+   "category": "backpack"
+  },
+  {
+   "mint": "Dx2bQe2UPv4k3BmcW8G2KhaL5oKsxduM5XxLSV3Sbonk",
+   "symbol": "Hosico",
+   "category": "custom"
+  },
+  {
+   "mint": "BRZ5aeJCDuruA42V1CntqKvofa2G7DS3yyxx1pZEpump",
+   "symbol": "moonkey",
+   "category": "custom"
+  },
+  {
+   "mint": "EfPoo4wWgxKVToit7yX5VtXXBrhao4G8L7vrbKy6pump",
+   "symbol": "DEXTER",
+   "category": "custom"
+  },
+  {
+   "mint": "9GyRGm8GGmRZyyQ2hEnazDvCSV8mXiMAHmjKwVHMvVpo",
+   "symbol": "YES",
+   "category": "custom"
+  },
+  {
+   "mint": "5zCETicUCJqJ5Z3wbfFPZqtSpHPYqnggs1wX7ZRpump",
+   "symbol": "SPARK",
+   "category": "custom"
+  },
+  {
+   "mint": "FkBF9u1upwEMUPxnXjcydxxVSxgr8f3k1YXbz7G7bmtA",
+   "symbol": "glorp",
+   "category": "custom"
+  },
+  {
+   "mint": "32eFDwQXfnj5ULY2b71cLuy5HJuhsRHSYTw3qCcKpump",
+   "symbol": "1",
+   "category": "custom"
+  },
+  {
+   "mint": "GvV7sFu6FHJsSVXfpG7xqFnWar3c7YkcC74rqe7Bpump",
+   "symbol": "RAGEGUY",
+   "category": "custom"
+  },
+  {
+   "mint": "4ikwYoNvoGEwtMbziUyYBTz1zRM6nmxspsfw9G7Bpump",
+   "symbol": "crypto",
+   "category": "custom"
+  },
+  {
+   "mint": "33LZGLLvtRDx3uAfJ1CcBSC7pNFqdiCBAvwPsVkBpump",
+   "symbol": "BILL",
+   "category": "custom"
+  },
+  {
+   "mint": "pepo1CFNU2RXf7yXX7HNXazXwxsq8WrPvDHpHriwoLY",
+   "symbol": "PEPO",
+   "category": "custom"
+  },
+  {
+   "mint": "x95HN3DWvbfCBtTjGm587z8suK3ec6cwQwgZNLbWKyp",
+   "symbol": "$HACHI",
+   "category": "custom"
   },
   {
    "mint": "ARBzQTYDCW2KnVEjs1Mc81LekB1ibVFZKbSVmorkoT9d",
-   "symbol": "ARB"
+   "symbol": "ARB",
+   "category": "backpack"
+  },
+  {
+   "mint": "8PzFWyLpCVEmbZmVJcaRTU5r69XKJx1rd7YGpWvnpump",
+   "symbol": "Percolator",
+   "category": "custom"
+  },
+  {
+   "mint": "D8kgv5BRyfxUgTJGhkPJcw1Neo1eaneENC5XxC99pump",
+   "symbol": "RZLR",
+   "category": "custom"
+  },
+  {
+   "mint": "VaxZxmFXV8tmsd72hUn22ex6GFzZ5uq9DVJ5wA5pump",
+   "symbol": "OIIAOIIA",
+   "category": "custom"
+  },
+  {
+   "mint": "AMUgSjmdFsS8Y3JeL32u7A45Fpt8YF9xKaiwW5uGHdXk",
+   "symbol": "CMNS",
+   "category": "custom"
+  },
+  {
+   "mint": "GvUCjmWSXA5hrTh9smmNA1AU55YCtP9mDLQcrKA1pump",
+   "symbol": "WSOLP",
+   "category": "custom"
+  },
+  {
+   "mint": "A8C3xuqscfmyLrte3VmTqrAq8kgMASius9AFNANwpump",
+   "symbol": "FWOG",
+   "category": "custom"
+  },
+  {
+   "mint": "AbpWkswGpFNYHatQG3eRTjpQLBoi5EYhbJQ7EspcR23R",
+   "symbol": "DripCat",
+   "category": "custom"
+  },
+  {
+   "mint": "Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump",
+   "symbol": "pippin",
+   "category": "custom"
+  },
+  {
+   "mint": "B6f27ETGcjgGNB1fqULJbXVmw9FnL8HgBp7R83hmpump",
+   "symbol": "drooling",
+   "category": "custom"
+  },
+  {
+   "mint": "7M3gDRgozcumFsiTeXwjB8cYxpg7Q9R7rH7rkw2Fpump",
+   "symbol": "CRIME",
+   "category": "custom"
+  },
+  {
+   "mint": "6D7NaB2xsLd7cauWu1wKk6KBsJohJmP2qZH9GEfVi5Ui",
+   "symbol": "SC",
+   "category": "custom"
+  },
+  {
+   "mint": "KMnDBXcPXoz6oMJW5XG4tXdwSWpmWEP2RQM1Uujpump",
+   "symbol": "FIGHT",
+   "category": "custom"
+  },
+  {
+   "mint": "BcHEaaTCvycPwwsJ9yQTXdHP9X2gCLkznDbZ8VySpump",
+   "symbol": "Jotchua",
+   "category": "custom"
+  },
+  {
+   "mint": "5mbK36SZ7J19An8jFochhQS4of8g6BwUjbeCSxBSoWdp",
+   "symbol": "$michi",
+   "category": "custom"
+  },
+  {
+   "mint": "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump",
+   "symbol": "GOAT",
+   "category": "custom"
+  },
+  {
+   "mint": "Fch1oixTPri8zxBnmdCEADoJW2toyFHxqDZacQkwdvSP",
+   "symbol": "HARAMBE",
+   "category": "custom"
+  },
+  {
+   "mint": "68fn2tLABKmS7VA9Eaz3n6RfoXM3iBWUACckT9dwpump",
+   "symbol": "HAPPY",
+   "category": "custom"
+  },
+  {
+   "mint": "9gwTegFJJErDpWJKjPfLr2g2zrE3nL1v5zpwbtsk3c6P",
+   "symbol": "USEDCAR",
+   "category": "custom"
+  },
+  {
+   "mint": "9WPTUkh8fKuCnepRWoPYLH3aK9gSjPHFDenBq2X1Czdp",
+   "symbol": "SELFIE",
+   "category": "custom"
+  },
+  {
+   "mint": "2qEHjDLDLbuBgRYvsxhc5D6uDWAivNFZGan56P1tpump",
+   "symbol": "Pnut",
+   "category": "custom"
+  },
+  {
+   "mint": "3psH1Mj1f7yUfaD5gh6Zj7epE8hhrMkMETgv5TshQA4o",
+   "symbol": "boden",
+   "category": "custom"
   },
   {
    "mint": "DoGEV7LASBkQbibMc5k5vKnTZoMg423GpJ5QtJEGfm7R",
-   "symbol": "DOGE"
+   "symbol": "DOGE",
+   "category": "backpack"
+  },
+  {
+   "mint": "21nnfR4TkbZNLwvRrqEseAbz7P3kxKjaV7KuboLJpump",
+   "symbol": "weedcoin",
+   "category": "custom"
+  },
+  {
+   "mint": "uuxWwFL6G9UjiYRZvWxJrSB18V1oKBgYrmueamREK57",
+   "symbol": "HONTER",
+   "category": "custom"
+  },
+  {
+   "mint": "3WPep4ufaToK1aS5s8BL9inzeUrt4DYaQCiic6ZkkC1U",
+   "symbol": "GIKO",
+   "category": "custom"
+  },
+  {
+   "mint": "HmjCoarLh5duURfJ333DwfFiPyTCgFT35pRSAoP8pump",
+   "symbol": "TOS",
+   "category": "custom"
+  },
+  {
+   "mint": "UKbXwN3ySC2jP5p9TyQ91yXYXmnnDsjiZQ55QCqpump",
+   "symbol": "KASPA",
+   "category": "custom"
   },
   {
    "mint": "EicWvteVi2fWepEzS3FYWsnuPoP6caZfjnKqNvydLjCH",
-   "symbol": "LIT"
+   "symbol": "LIT",
+   "category": "backpack"
+  },
+  {
+   "mint": "eL5fUxj2J4CiQsmW85k5FG9DvuQjjUoBHoQBi2Kpump",
+   "symbol": "UFD",
+   "category": "custom"
+  },
+  {
+   "mint": "EdhTCqUxXRWQcUd5Fonyz9rapHAB6mABAuVkmPrtpump",
+   "symbol": "UNITY",
+   "category": "custom"
+  },
+  {
+   "mint": "7TKRV4SneC6xLRaAt21a6d1kheAzXHGKP9WDzri9aD2e",
+   "symbol": "SHINJUKU",
+   "category": "custom"
+  },
+  {
+   "mint": "Gka1TQEevBbVw4W9K15ER96ZzKByMTb6TBMQzWFEpump",
+   "symbol": "MINER",
+   "category": "custom"
+  },
+  {
+   "mint": "8G5ayEsJF4Q7FEWEGeF4jtnUWZBEKCqhySTFQf9Ppump",
+   "symbol": "HeavyPulp",
+   "category": "custom"
+  },
+  {
+   "mint": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+   "symbol": "BIO",
+   "category": "custom"
+  },
+  {
+   "mint": "7Y7V1a4m2nWK7BMgbka5B4vR1pDvCK7yva3Hnrqkraze",
+   "symbol": "Nasduck",
+   "category": "custom"
+  },
+  {
+   "mint": "EmcxFTNVDqyLHp11NvwvLZ4D7LKGbG9i7B8RF7dwpump",
+   "symbol": "ZERO",
+   "category": "custom"
+  },
+  {
+   "mint": "9GGGhze1NnQwcABTzxdxx89BEFLFtDueHhkwh6japump",
+   "symbol": "CatGPT",
+   "category": "custom"
+  },
+  {
+   "mint": "463SK47VkB7uE7XenTHKiVcMtxRsfNE2X4Q9wByaURVA",
+   "symbol": "TSUKI",
+   "category": "custom"
+  },
+  {
+   "mint": "7m2TUkpPZCScBhPJnGjWjbh75KkDNnwAdd7i74m8awad",
+   "symbol": "Ww3",
+   "category": "custom"
+  },
+  {
+   "mint": "62YE1d4sRArBQzR5bdbxsx2k9LV3MdPV4xMC4Di2pump",
+   "symbol": "BIF",
+   "category": "custom"
+  },
+  {
+   "mint": "FeR8VBqNRSUD5NtXAj2n3j1dAHkZHfyDktKuLXD4pump",
+   "symbol": "jellyjelly",
+   "category": "custom"
+  },
+  {
+   "mint": "EW7cWbNmTgL7PLQNiJ6tBVC62SJzJXa2pFYJjDPPpump",
+   "symbol": "SOBAT",
+   "category": "custom"
+  },
+  {
+   "mint": "E3HSQRoXC34RVPWYYDuxm4cNBspwBaVRSqBnRdEFpump",
+   "symbol": "PUGCOIN",
+   "category": "custom"
+  },
+  {
+   "mint": "EVULoNF4DeMBN4dGiZiDfpiiTfNZgoCvXWWgaV3epump",
+   "symbol": "TOKEN",
+   "category": "custom"
   },
   {
    "mint": "NKEda5nHhNGgjrE9nDdMvaEmkmJ96qqxzBVZEcKmjSg",
-   "symbol": "NIKE"
+   "symbol": "NIKE",
+   "category": "backpack"
+  },
+  {
+   "mint": "AZsHEMXd36Bj1EMNXhowJajpUXzrKcK57wW4ZGXVa7yR",
+   "symbol": "GUAC",
+   "category": "custom"
+  },
+  {
+   "mint": "AzeNfRi7DX5HndH7dUgCxMD5sQPV7FPFH1cwDkoqpump",
+   "symbol": "KNIGHT",
+   "category": "custom"
+  },
+  {
+   "mint": "DmGvYx7R4ZJnSocMauain4LXh3oA8kuDYavLoDLYpump",
+   "symbol": "Ram",
+   "category": "custom"
   },
   {
    "mint": "PEAQjk7SRS6rXHVFFmpRr7zrC4g5ZuEebpwTxvaLr3b",
-   "symbol": "PEAQ"
+   "symbol": "PEAQ",
+   "category": "backpack"
+  },
+  {
+   "mint": "GJAFwWjJ3vnTsrQVabjBVK2TYB1YtRCQXRDfDgUnpump",
+   "symbol": "ACT",
+   "category": "custom"
+  },
+  {
+   "mint": "4oWhtcmBBsMG1bLZCLKusmq4t9fxdVVfbyJLevsYg5Ct",
+   "symbol": "CRIMECAT",
+   "category": "custom"
+  },
+  {
+   "mint": "J6pQQ3FAcJQeWPPGppWRb4nM8jU3wLyYbRrLh7feMfvd",
+   "symbol": "DOUBLEZERO",
+   "category": "custom"
+  },
+  {
+   "mint": "3B5wuUrMEi5yATD7on46hKfej3pfmd7t1RKgrsN3pump",
+   "symbol": "BILLY",
+   "category": "custom"
+  },
+  {
+   "mint": "2fUFhZyd47Mapv9wcfXh5gnQwFXtqcYu9xAN4THBpump",
+   "symbol": "RNT",
+   "category": "custom"
+  },
+  {
+   "mint": "FtateF34Xzawa91bpbVNdX72hZYo9cymRDYqBreHHbJi",
+   "symbol": "PANTS",
+   "category": "custom"
+  },
+  {
+   "mint": "WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp",
+   "symbol": "XMR",
+   "category": "custom"
   },
   {
    "mint": "SPHRp8cZaSQBTp1KMNP4V1X821SXhXWt4Q2yLdyHzju",
-   "symbol": "SPHR"
+   "symbol": "SPHR",
+   "category": "backpack"
+  },
+  {
+   "mint": "Xs2yquAgsHByNzx68WJC55WHjHBvG9JsMB7CWjTLyPy",
+   "symbol": "DFDV",
+   "category": "xstock"
+  },
+  {
+   "mint": "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
+   "symbol": "JTO",
+   "category": "custom"
   },
   {
    "mint": "HTZsLG4zqaNvWMwXSLHH3GG5KyJpKwpBRsKVdMG6hvzP",
-   "symbol": "HTZ"
+   "symbol": "HTZ",
+   "category": "backpack"
   },
   {
    "mint": "RDDTGbhHwVXfyCvQMXzzowKjf5qrYBZAnehoXW83ooh",
-   "symbol": "RDDT"
+   "symbol": "RDDT",
+   "category": "backpack"
   },
   {
    "mint": "CZEB3WNZuF2Yz1z2H81RcCk8T7fsw82KB33zqamASVsg",
-   "symbol": "COST"
+   "symbol": "COST",
+   "category": "backpack"
   },
   {
    "mint": "DELL2aRKQz7DMq5DrKLtkn47ZCnbxXPZXrSGbkmd13wy",
-   "symbol": "DELL"
+   "symbol": "DELL",
+   "category": "backpack"
   },
   {
    "mint": "DJTu7vi8norVzdVAffgvb39VP7wjKeTsgaMBJrzfxvoF",
-   "symbol": "DJT"
+   "symbol": "DJT",
+   "category": "backpack"
   },
   {
    "mint": "BMKdM4yUxX12moFqVk195k7coMbaybd4RUKCUdm7D1Sk",
-   "symbol": "IBM"
+   "symbol": "IBM",
+   "category": "backpack"
   },
   {
    "mint": "LMT3i1BHgixFqPUgcyteJhnEz2dpy9i3cYy4pi9BoeV",
-   "symbol": "LMT"
+   "symbol": "LMT",
+   "category": "backpack"
   },
   {
    "mint": "QUBTAD8C9bMU9LvmMNgKPhrmBGbHvxpu6vfWQtThxxw",
-   "symbol": "QUBT"
+   "symbol": "QUBT",
+   "category": "backpack"
   },
   {
    "mint": "RBLXDGRD64AtRamHMFVcjqne3Ar7NLWtFtYNtsrf1cE",
-   "symbol": "RBLX"
+   "symbol": "RBLX",
+   "category": "backpack"
   },
   {
    "mint": "HiMSSzzwkZkrXJ4PGVJRdtfLaANeAztjjcgk5Dxe7Lwx",
-   "symbol": "HIMS"
+   "symbol": "HIMS",
+   "category": "backpack"
   },
   {
    "mint": "LULUmT9VMttkfAJE236LXJcYJ2tTP7nunrSWR5G1BdS",
-   "symbol": "LULU"
+   "symbol": "LULU",
+   "category": "backpack"
   },
   {
    "mint": "PFER6ENqP8r8NF3CqVt4mFowxsin3V5MLidBNQFCC3x",
-   "symbol": "PFIZER"
+   "symbol": "PFIZER",
+   "category": "backpack"
   },
   {
    "mint": "RcZmt84VMJv9bDhKqmw1uWDahYrUT468VwAChTnfD8p",
-   "symbol": "RIVN"
+   "symbol": "RIVN",
+   "category": "backpack"
   },
   {
    "mint": "SH55hfaipFAbwT42nQYhRoM5o5t61QpkmJ6p62vXB3m",
-   "symbol": "SHOP"
+   "symbol": "SHOP",
+   "category": "backpack"
   },
   {
    "mint": "SNAPcESrvnH8yUdgeMF6xm1hym9b6hW6s8YeqeHdZFz",
-   "symbol": "SNAP"
+   "symbol": "SNAP",
+   "category": "backpack"
   },
   {
    "mint": "UPSqUeMHcWbkdg784XuBUEF9DtySSnW9ur5LAVdcuB9",
-   "symbol": "UPS"
+   "symbol": "UPS",
+   "category": "backpack"
   },
   {
    "mint": "PENGTDQeQSXEjKcYw3CTQi9qznxcTHXAA7LMfUNrxLV",
-   "symbol": "PENG"
+   "symbol": "PENG",
+   "category": "backpack"
   },
   {
    "mint": "BArimz1PcKZr8PcPh3tcZ2dg4S7FJLk3cw6R5F8GsHKg",
-   "symbol": "BOEING"
+   "symbol": "BOEING",
+   "category": "backpack"
   },
   {
    "mint": "AMBAHqGPjjtJaHPPSuvPu2mPCJdkGZpmhHQa5pkXbxrM",
-   "symbol": "AMBA"
+   "symbol": "AMBA",
+   "category": "backpack"
   },
   {
    "mint": "BULL151gUXcFV5wXEUqu9Am2L7Qt4bTJRLRuAUjkcspC",
-   "symbol": "WEBULL"
+   "symbol": "WEBULL",
+   "category": "backpack"
   },
   {
    "mint": "JNJg1znKdF712Phe7L7z52AATAvEjEytBdN2w8Lnh1Y",
-   "symbol": "JNJ"
+   "symbol": "JNJ",
+   "category": "backpack"
   },
   {
    "mint": "BABANGA4JE7Kkam4nTrALAwAVgsNJUuFJnnkF7S16BZp",
-   "symbol": "BABA"
+   "symbol": "BABA",
+   "category": "backpack"
   },
   {
    "mint": "GRNDYDpqwpCm6jVxpbh4xT5AM4r3p391qYsKTHqgaET2",
-   "symbol": "GRND"
+   "symbol": "GRND",
+   "category": "backpack"
+  },
+  {
+   "mint": "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82",
+   "symbol": "BOME",
+   "category": "custom"
   },
   {
    "mint": "MGMuubtUEirmkhfEQdmGUh4pr7HuUdMWcZXFtpPbVJD",
-   "symbol": "MGM"
+   "symbol": "MGM",
+   "category": "backpack"
+  },
+  {
+   "mint": "he1iusmfkpAdwvxLNGV8Y1iSbj4rUy6yMhEA3fotn9A",
+   "symbol": "HSOL",
+   "category": "custom"
   },
   {
    "mint": "DNUTsCvKbKwu2RM72cUuW3TD9YpzArzACcqYQssjPLSk",
-   "symbol": "DNUT"
+   "symbol": "DNUT",
+   "category": "backpack"
   },
   {
    "mint": "WENAZ2WyPbmgvUcKfQ8hyMDfBQP9bZ65hsZ5KTFrRGZ",
-   "symbol": "WEN"
+   "symbol": "WEN",
+   "category": "backpack"
+  },
+  {
+   "mint": "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp",
+   "symbol": "ORE",
+   "category": "custom"
   },
   {
    "mint": "DKNGQFNGQmoBdXSRGKJ8tTu7uPDasw5JDcfMmWniNfow",
-   "symbol": "DKNG"
+   "symbol": "DKNG",
+   "category": "backpack"
+  },
+  {
+   "mint": "AavE1kKKnesPw4MuRJmJ9jZs9QzEE8CPxQ3ViczUDfc1",
+   "symbol": "AAVE",
+   "category": "custom"
+  },
+  {
+   "mint": "CrAr4RRJMBVwRsZtT62pEhfA9H5utymC2mVx8e7FreP2",
+   "symbol": "MON",
+   "category": "custom"
+  },
+  {
+   "mint": "suifhC9gU1VbJAPYPTBkHJyyyStKGLLYPVDTmPoqbvA",
+   "symbol": "SUI",
+   "category": "custom"
   },
   {
    "mint": "FLWSojG1gB5VStYR3Sb4nQFRt43UBYkqih1j2CpVLqgd",
-   "symbol": "FLWS"
+   "symbol": "FLWS",
+   "category": "backpack"
+  },
+  {
+   "mint": "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",
+   "symbol": "PYTH",
+   "category": "custom"
   },
   {
    "mint": "LinkhB3afbBKb2EQQu7s7umdZceV3wcvAUJhQAfQ23L",
-   "symbol": "LINK"
+   "symbol": "LINK",
+   "category": "backpack"
   },
   {
    "mint": "SCHHJ3jRdSjeFEVAaLrnYdx3Brphn92Ys7z1qkiCtPX",
-   "symbol": "SCHH"
+   "symbol": "SCHH",
+   "category": "backpack"
+  },
+  {
+   "mint": "SATqS9DYpLQsM2z51P4QCoqJRHa5wboV4qjJerJRUSH",
+   "symbol": "RUSH",
+   "category": "custom"
   },
   {
    "mint": "PTNzAfFAB4LvoUQEUUGrFMyUoRLExMYjH6CcfyQfsVP",
-   "symbol": "PTN"
+   "symbol": "PTN",
+   "category": "backpack"
   },
   {
    "mint": "FLYRq3en8r2Z69gN3KyAnDrvnitEJNkwPYY7favinHeD",
-   "symbol": "FLY"
+   "symbol": "FLY",
+   "category": "backpack"
   },
   {
    "mint": "BRVaZKg6J9iF2BEsdpsxJ9NyvN9PPxPZuoQUX2v8qqkk",
-   "symbol": "BROS"
+   "symbol": "BROS",
+   "category": "backpack"
   },
   {
    "mint": "AMD8XwJXgQ9WV45Wyj9yFLejxzf2J6VM1PJY8bJEjeES",
-   "symbol": "AMD"
+   "symbol": "AMD",
+   "category": "backpack"
   },
   {
    "mint": "chipCAT7vi5CZtbZsn9z7iMPXvFwyAnKz3QFu8XVuHm",
-   "symbol": "CHIP"
+   "symbol": "CHIP",
+   "category": "backpack"
   },
   {
    "mint": "FWDtiB5fXHdVAewPqvHPL2dh4aBC1C6GacQbePoQXKjz",
-   "symbol": "FWDI"
+   "symbol": "FWDI",
+   "category": "backpack"
   },
   {
    "mint": "LUV9GB51PNZNRyzzyYK3rtqFfvDvWtRiXZ34wVq2HrX",
-   "symbol": "LUV"
+   "symbol": "LUV",
+   "category": "backpack"
+  },
+  {
+   "mint": "pSo1f9nQXWgXibFtKf7NWYxb5enAM4qfP6UJSiXRQfL",
+   "symbol": "PSOL",
+   "category": "solana"
   },
   {
    "mint": "1NJMqVM4PadjuzYmeB7zV7q7DV8oB3ExaQCd9x6KsLz",
-   "symbol": "INJ"
+   "symbol": "INJ",
+   "category": "backpack"
   },
   {
    "mint": "WULFeyfrj1VJKD9HhRTcW8R4g5HefUA11HDEdBv2WxD",
-   "symbol": "WULF"
+   "symbol": "WULF",
+   "category": "backpack"
+  },
+  {
+   "mint": "SoLo9oxzLDpcq1dpqAgMwgce5WqkRDtNXK7EPnbmeta",
+   "symbol": "SOLO",
+   "category": "custom"
   },
   {
    "mint": "RUMsPfFZFnN1ZmGANwP7FNMJMjKH4m9RiMePrtVtLe7",
-   "symbol": "RUM"
+   "symbol": "RUM",
+   "category": "backpack"
   },
   {
    "mint": "USNv3NkKA27Dh4nsHJDPhW4VoEcTQmjoZyJt2dqdwFu",
-   "symbol": "USO"
+   "symbol": "USO",
+   "category": "backpack"
   },
   {
    "mint": "CYPHuMmCL1GxJWa2tsPhLKykC7GrHJTCHwbXD4g5uawK",
-   "symbol": "CYPH"
+   "symbol": "CYPH",
+   "category": "backpack"
   },
   {
    "mint": "PEPEqnuuCDbBC89p1u9vpnP1KQ2oj1xTcQBsjt9X55m",
-   "symbol": "PEPE"
+   "symbol": "PEPE",
+   "category": "backpack"
+  },
+  {
+   "mint": "HkJiit2pbesCzSPyEmmf5jnvHpE3RXdB8KmzAWtsmFS6",
+   "symbol": "WRY",
+   "category": "custom"
   },
   {
    "mint": "BBosJLw8ZzoATiEyywiifx7AgmrD2Cm3XjFWbhbRhChy",
-   "symbol": "BB"
+   "symbol": "BB",
+   "category": "backpack"
+  },
+  {
+   "mint": "GTBxUiw6wJdmmkCGZgRHLyYxqu1vG4KtRpeox6yDpump",
+   "symbol": "JEANPHIL",
+   "category": "custom"
+  },
+  {
+   "mint": "EzfgjvkSwthhgHaceR3LnKXUoRkP6NUhfghdaHAj1tUv",
+   "symbol": "FTT",
+   "category": "custom"
+  },
+  {
+   "mint": "DeatoN4UYU2B658Lh4ZV1VXy1u2ros32UEwnAtCRv4nB",
+   "symbol": "TRCH1",
+   "category": "custom"
   },
   {
    "mint": "avaxGHCq3T7hoxd73oY2KY9hJSTaeMibXvHy5KNzh5D",
-   "symbol": "AVAX"
+   "symbol": "AVAX",
+   "category": "backpack"
+  },
+  {
+   "mint": "4K1m7gAMDKzrxQn68yuZAd767w57Fw7Ykw69dG3umeta",
+   "symbol": "RAWR",
+   "category": "custom"
   },
   {
    "mint": "URARfsinxCRw4JpvQhuT4CxavdZXZEMjv9ZwWmWpwag",
-   "symbol": "URA"
+   "symbol": "URA",
+   "category": "backpack"
   },
   {
    "mint": "CzLTZppPdZtTjyq3WGpHLstoc3GLhu7zH5Zg6xUa6Gv5",
-   "symbol": "COPX"
+   "symbol": "COPX",
+   "category": "backpack"
   },
   {
    "mint": "NQ5hSuXQZrbnrwcDVk2qN73njjd3E3v3badYHnj5thF",
-   "symbol": "IONQ"
+   "symbol": "IONQ",
+   "category": "backpack"
   },
   {
    "mint": "C1MHyoTJpRTeS9AQCyspNVu2EWAYCZwmJ1jNkEArFP1f",
-   "symbol": "APE"
+   "symbol": "APE",
+   "category": "backpack"
   },
   {
    "mint": "ARMbSB1MBRQrY6PNMao1HdQ431VafC6JRJCsGZ2Yv3iJ",
-   "symbol": "ARM"
+   "symbol": "ARM",
+   "category": "backpack"
+  },
+  {
+   "mint": "M1M6sdffCs3ozzhpRveweRCWdZhxth4mvVujPtYEC3h",
+   "symbol": "MIM",
+   "category": "custom"
   },
   {
    "mint": "CRWVJeR2yEZuDUKYfGuKCHvLz8ywn4LGvovHfy5WiFmi",
-   "symbol": "CRWV"
+   "symbol": "CRWV",
+   "category": "backpack"
+  },
+  {
+   "mint": "7ga6rtE9qSb3wdEiDCpTu2kHqoGVfT52jD8ign1rYTvx",
+   "symbol": "XHYPE",
+   "category": "leverage"
   },
   {
    "mint": "72QvBVwpxqmheEPfaCwWSWqEFsUy3rhWt6JhQBMNTwD1",
-   "symbol": "ENA"
+   "symbol": "ENA",
+   "category": "backpack"
   },
   {
    "mint": "4Zp52aF4hZi9fzH19xpbWKYKQvgLyCN67KFbrQDqeTKh",
-   "symbol": "ZAMA"
+   "symbol": "ZAMA",
+   "category": "backpack"
   },
   {
    "mint": "RENzhrJQgmAnfcLhU1U5XwAMc6TC15UA6jCbPBaasnj",
-   "symbol": "IREN"
+   "symbol": "IREN",
+   "category": "backpack"
+  },
+  {
+   "mint": "Grass7B4RdKfBCjTKgSqnXkqjwiGvQyFbuSCUJr3XXjs",
+   "symbol": "GRASS",
+   "category": "custom"
   },
   {
    "mint": "SQQQAa3gUxgnqcEsdjPA4RQNQBgB97TnG2hJhk2WaGE",
-   "symbol": "SQQQ"
+   "symbol": "SQQQ",
+   "category": "backpack"
   },
   {
    "mint": "cbLTC4T5NpzSUtQ7ekgEMZGaUPVJY1ko6BUikqa4gGf",
-   "symbol": "CBLTC"
+   "symbol": "CBLTC",
+   "category": "backpack"
+  },
+  {
+   "mint": "MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey",
+   "symbol": "MNDE",
+   "category": "custom"
   },
   {
    "mint": "EWY4owSJYMpwN33qGDu5gGxpkQkpMJu8ZUsQJaNZG5dv",
-   "symbol": "EWY"
+   "symbol": "EWY",
+   "category": "backpack"
+  },
+  {
+   "mint": "CARSsxWPkpQWvfyRBwfGMGvysJBHdHGfE46X5MNgmeta",
+   "symbol": "CARS",
+   "category": "custom"
+  },
+  {
+   "mint": "1zJX5gRnjLgmTpq5sVwkq69mNDQkCemqoasyjaPW6jm",
+   "symbol": "KLED",
+   "category": "custom"
   },
   {
    "mint": "4qQeZ5LwSz6HuupUu8jCtgXyW1mYQcNbFAW1sWZp89HL",
-   "symbol": "CAKE"
+   "symbol": "CAKE",
+   "category": "backpack"
   },
   {
    "mint": "N7Q5fYX7YRnDQksfdBKnoUb3awm92n7QNAD35X3Rq1X",
-   "symbol": "NOK"
+   "symbol": "NOK",
+   "category": "backpack"
   },
   {
    "mint": "cbADAmv9issuPfhFwyQG3xac4DGPd1LDSt1oz7vwJsg",
-   "symbol": "CBADA"
+   "symbol": "CBADA",
+   "category": "backpack"
   },
   {
    "mint": "RKLBnAXGqv31iZomqsuAWkQm1aqC7JwwvbCfzGdqAhz",
-   "symbol": "RKLB"
+   "symbol": "RKLB",
+   "category": "backpack"
   },
   {
    "mint": "NFLX7qV57zuVxCoHy3s1jiGZyALraLNwttbxdvmYJLJ",
-   "symbol": "NFLX"
+   "symbol": "NFLX",
+   "category": "backpack"
+  },
+  {
+   "mint": "69LjZUUzxj3Cb3Fxeo1X4QpYEQTboApkhXTysPpbpump",
+   "symbol": "CODEC",
+   "category": "custom"
   },
   {
    "mint": "BEBVfXZ8uCxRBuunEbW9wcq9r7W9ySNo14oJBJkDgpZx",
-   "symbol": "BE"
+   "symbol": "BE",
+   "category": "backpack"
   },
   {
    "mint": "qntUzPUsJ51abNP7VYNxkmsQ4RnvEZAhavUxsCxpxH4",
-   "symbol": "QNT"
+   "symbol": "QNT",
+   "category": "backpack"
   },
   {
    "mint": "ondohH8Vssxiqcy5u6Efi4AYN17KZrzQtv2a91dnrgW",
-   "symbol": "ONDO"
+   "symbol": "ONDO",
+   "category": "backpack"
   },
   {
    "mint": "PUSAG1stksTcAoK9MjinEHUwAYRJsbovywYCk37m6hy",
-   "symbol": "PUSA"
+   "symbol": "PUSA",
+   "category": "backpack"
   },
   {
    "mint": "BLKKYfF41c6xRPrtX1rdYbxLE1xxEdZUnxQsB5hcZ8Nf",
-   "symbol": "BLK"
+   "symbol": "BLK",
+   "category": "backpack"
+  },
+  {
+   "mint": "METAewgxyPbgwsseH8T16a39CQ5VyVxZi9zXiDPY18m",
+   "symbol": "MPLX",
+   "category": "custom"
   },
   {
    "mint": "shib5gSoVKPjwkXrxRk7SbQFzb2R9rQB3TgQWYX4RwW",
-   "symbol": "SHIB"
+   "symbol": "SHIB",
+   "category": "backpack"
+  },
+  {
+   "mint": "GbbesPbaYh5uiAZSYNXTc7w9jty1rpg3P9L4JeN4LkKc",
+   "symbol": "TRX",
+   "category": "custom"
   },
   {
    "mint": "EWZzCki1igp2y73UyUM4RCG4QUVMQAtnrQUVNaDHzDxJ",
-   "symbol": "EWZ"
+   "symbol": "EWZ",
+   "category": "backpack"
+  },
+  {
+   "mint": "5tCju6YNxHq5zrA6tGndr6F7TK42mpUFmeE31cSFpump",
+   "symbol": "SWORDCAT",
+   "category": "custom"
   },
   {
    "mint": "CBRSFBbQPpp77NpMcwbTN6fhBHmZM94oFLJvruytw4Fi",
-   "symbol": "CBRS"
+   "symbol": "CBRS",
+   "category": "backpack"
   }
  ]
 }

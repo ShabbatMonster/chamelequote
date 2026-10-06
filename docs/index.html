@@ -106,7 +106,10 @@
         <span class="field-label" id="quote-label">New quote token:</span>
         <div class="combo" id="quote-combo">
           <button type="button" class="combo-field" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="quote-label" aria-controls="quote-list"><span class="combo-value">Choose&hellip;</span><span class="combo-arrow" aria-hidden="true"></span></button>
-          <ul class="combo-list" id="quote-list" role="listbox" aria-labelledby="quote-label" hidden></ul>
+          <div class="combo-pop" hidden>
+            <input type="search" class="combo-search" placeholder="Search ticker, name or address" aria-label="Search quote tokens" aria-controls="quote-list" autocomplete="off" spellcheck="false">
+            <ul class="combo-list" id="quote-list" role="listbox" aria-labelledby="quote-label"></ul>
+          </div>
         </div>
         <table class="cost">
           <tr><th scope="row">Cost</th><td><b id="switch-cost">1,000,000</b> <b class="coin-sym">$COIN</b> burned forever, plus 0.03 SOL the first time the coin moves to a quote (rent for its new pool)</td></tr>
