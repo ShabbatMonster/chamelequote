@@ -15,6 +15,10 @@ pub const EMA_HALF_LIFE: i64 = 300;
 pub const MAX_POKE_GAP: i64 = 120;
 pub const EMA_WARMUP: i64 = 600;
 
+/// After a switch the pool's average restarts from the price the program itself set (nothing to
+/// manipulate there), so it only needs this long, not the full warm-up, before the next switch.
+pub const SWITCH_COOLDOWN: i64 = 300;
+
 /// A switch that has not finished by its deadline can be aborted by anyone.
 pub const SWITCH_TIMEOUT: i64 = 600;
 

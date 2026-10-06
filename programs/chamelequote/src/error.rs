@@ -68,4 +68,6 @@ pub enum ChameleonError {
     BelowPoolFloor,
     #[msg("pull must come with add in the same transaction")]
     NotAtomic,
+    #[msg("The last switch was moments ago; the next one opens a few minutes after it")]
+    CoolingDown,
 }

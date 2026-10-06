@@ -408,6 +408,10 @@ pub fn request_switch(ctx: Context<RequestSwitch>) -> Result<()> {
     require!(config.switch.phase == Phase::Idle, E::WrongPhase);
     let (old, new, wsol) = (&ctx.accounts.old_quote, &ctx.accounts.new_quote, &ctx.accounts.wsol_quote);
     require!(new.enabled, E::QuoteDisabled);
+    // The pull needs the pool's average; refuse now rather than escrow a burn that would wait.
+    let ema = config.pool_ema;
+    require!(ema.last_ts != 0 && now - ema.last_ts <= MAX_POKE_GAP, E::StalePrice);
+    require!(ema.is_valid(now), E::CoolingDown);
     require_keys_neq!(new.mint, config.active_quote, E::SameQuote);
 
     let usd_old = usd_sqrt(old, wsol, config, now, true)?;
@@ -973,8 +977,9 @@ pub fn add<'info>(ctx: Context<'info, Add<'info>>) -> Result<()> {
     config.active_quote = target;
     config.active_pool = pool_key;
     config.floor_sqrt = sqrt_min;
-    // The average restarts here, so the next pull waits out the warm-up: a natural cooldown.
-    config.pool_ema = Ema { sqrt_price, last_ts: now, streak_start: now };
+    // The average restarts here from the price we just set, counted as already part warmed up:
+    // the next switch can go after SWITCH_COOLDOWN of pokes.
+    config.pool_ema = Ema { sqrt_price, last_ts: now, streak_start: now - (EMA_WARMUP - SWITCH_COOLDOWN) };
     config.switch = Switch::default();
     emit!(Switched {
         requester: s.requester,

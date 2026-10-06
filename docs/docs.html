@@ -97,10 +97,10 @@
             <tr><td>Add</td><td>Liquidity goes back in, and your escrowed tokens are burned. A new pool is created at the carried-over price, with the floor as its lowest price. Right after, 0.1% of the backing (with the matching amount of the coin) goes into the new pool for good as a thin position, so the pool can be moved to a new price when the coin comes back; a pool with nothing in it can't be.</td></tr>
           </tbody>
         </table>
-        <p>The keeper runs every step in a single transaction as soon as your request lands, and the program won't take the liquidity out any other way. So a switch happens all at once or not at all: trading never pauses. If a switch is not finished within <b>10 minutes</b>, anyone can cancel it: your 1,000,000 tokens are sent back, and the liquidity goes back in against whichever token the backing is held in at that moment.</p>
+        <p>The keeper runs every step in a single transaction as soon as your request lands, and the program won't take the liquidity out any other way. So a switch happens all at once or not at all: trading never pauses. If a switch can't go through within <b>10 minutes</b> (say a price it needs has moved too far), it is cancelled and your 1,000,000 tokens are sent back. The coin stays where it was.</p>
         <h3>When you can't switch</h3>
         <ul>
-          <li>Another switch is already running.</li>
+          <li>Another switch is already running, or the last one was less than 5 minutes ago.</li>
           <li>The token you picked is already the quote, or has been disabled.</li>
           <li>The price moved sharply in the last half hour. The program waits for its averages to catch up (see <a href="#averages">section 5</a>).</li>
           <li>The averages have not been updated in the last 2 minutes, which means the keeper is down.</li>
@@ -147,7 +147,7 @@
             <tr><td>A swap may return less than the average says</td><td>2%, after the pool's own fee</td></tr>
           </tbody>
         </table>
-        <p>The admin can tighten or loosen these within hard limits (0.5% to 5%). The averages restart whenever the coin lands in a new pool, so there is a natural 10-minute cooldown between switches. After a genuine big move, such as a 2&times; pump, switching waits roughly 25 minutes for the average to catch up.</p>
+        <p>The admin can tighten or loosen these within hard limits (0.5% to 5%). After every switch the coin's own average restarts from the price the program just set, so the next switch can go 5 minutes later (the site counts it down; requests before then are refused before anything is burned). After a genuine big move, such as a 2&times; pump, switching waits roughly 25 minutes for the average to catch up.</p>
       </section>
 
       <section id="quotes">

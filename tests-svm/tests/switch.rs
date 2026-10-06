@@ -560,3 +560,23 @@ fn a_new_pool_costs_the_requester_its_rent_and_a_known_one_costs_nothing() {
     env.request(&whale, usdc).unwrap();
     assert_eq!(lamports(&env, &fee), f1);
 }
+
+#[test]
+fn the_next_switch_opens_five_minutes_after_the_last() {
+    let (mut env, whale) = traded();
+    let (x, usdc) = (env.x, env.usdc);
+    let whale_token = chamelequote::whirlpool::ata(&whale.pubkey(), &env.mint, &anchor_spl::token::spl_token::ID);
+    env.request(&whale, x).unwrap();
+    env.crank().unwrap();
+    // Right after: refused before anything burns.
+    let bal = env.balance(&whale_token);
+    env.keep(120);
+    let err = env.request(&whale, usdc).unwrap_err();
+    assert!(err.contains("CoolingDown"), "{err}");
+    assert_eq!(env.balance(&whale_token), bal);
+    // Five minutes after the switch (pokes every minute): open.
+    env.keep(180);
+    env.request(&whale, usdc).unwrap();
+    env.crank().unwrap();
+    assert_eq!(env.config().active_quote, usdc);
+}

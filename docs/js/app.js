@@ -187,7 +187,7 @@ function renderSwitch() {
   const inFlight = sw.phase !== "Idle";
   const done = inFlight ? STEP_DONE[sw.phase] : watching?.finished ? 5 : null;
   box.hidden = done == null;
-  $("switch-go").disabled = inFlight || !view.launched;
+  updateCooldown();
   if (done == null) return;
   $("switch-fill").style.width = `${(done / 5) * 100}%`;
   [...$("switch-steps").children].forEach((li, i) => {
@@ -198,6 +198,23 @@ function renderSwitch() {
     say($("switch-msg"), `A switch to ${t?.symbol ?? short(sw.target)} is in progress. One at a time, please.`);
   }
 }
+
+// After a switch the coin's price average needs a few minutes of updates before the program
+// allows the next one (it refuses requests until then, before anything is burned).
+function updateCooldown() {
+  if (!view) return;
+  const inFlight = view.sw.phase !== "Idle";
+  const left = view.opensAt ? Math.ceil(view.opensAt - Date.now() / 1000) : 0;
+  const cooling = !inFlight && view.launched && left > 0;
+  $("switch-go").disabled = inFlight || !view.launched || cooling;
+  const note = $("switch-cooldown");
+  note.hidden = !cooling;
+  if (cooling) {
+    const m = Math.floor(left / 60), s = String(left % 60).padStart(2, "0");
+    note.textContent = `Next switch possible in ${m}:${s} (the price settles for a few minutes after every switch).`;
+  }
+}
+setInterval(updateCooldown, 1000);
 
 // ---------------------------------------------------------------------------------------------
 // Wallet
@@ -469,7 +486,10 @@ async function onRename(e) {
 function friendly(e) {
   const s = String(e?.message ?? e);
   if (/reject|denied|cancel/i.test(s)) return "You cancelled it in your wallet. Nothing was burned.";
+  if (/CoolingDown/.test(s)) return "The last switch was moments ago. The next one opens a few minutes after it. Nothing was burned.";
   if (/StalePrice/.test(s)) return "Prices are still settling after a big move. Try again in a few minutes.";
+  if (/BelowPoolFloor/.test(s)) return "The coin would land below that quote's pool floor right now. Pick another quote. Nothing was burned.";
+  if (/ForeignPool/.test(s)) return "That quote's pool was set up by someone else, so the coin can't use it. Nothing was burned.";
   if (/WrongPhase/.test(s)) return "Another switch is already running. Wait for it to finish.";
   if (/insufficient/i.test(s)) return "Not enough tokens or SOL for this.";
   return `Something went wrong: ${s.slice(0, 160)}`;
@@ -523,6 +543,8 @@ function toView(s, happenings, image) {
     quoteChanges: Number(s.config.quoteChanges),
     quotes: s.quotes.map(quoteView),
     sw: { phase: s.config.switch.phase, target: s.config.switch.target.toBase58() },
+    // When the coin's price average has warmed up enough for the next switch (the program's rule).
+    opensAt: Number(s.config.poolEma.streakStart) + 600,
     happenings: happenings.map((h) => {
       // The launch lays the first pool through the same path as a switch, with no requester.
       const launch = h.name === "Switched" && /^1+$/.test(h.user.toBase58());
