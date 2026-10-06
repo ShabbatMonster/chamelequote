@@ -174,7 +174,14 @@ pub fn send_v0(
         .0
         .simulate_transaction_with_config(
             &tx,
-            RpcSimulateTransactionConfig { sig_verify: false, commitment: Some(CommitmentConfig::processed()), ..Default::default() },
+            // The RPC may answer from a node that hasn't seen our (fresh) blockhash yet; let it use
+            // its own for the simulation instead of failing with BlockhashNotFound.
+            RpcSimulateTransactionConfig {
+                sig_verify: false,
+                replace_recent_blockhash: true,
+                commitment: Some(CommitmentConfig::processed()),
+                ..Default::default()
+            },
         )
         .map_err(|e| format!("{label} simulation: {e}"))?
         .value;

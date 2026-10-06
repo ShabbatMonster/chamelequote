@@ -201,7 +201,19 @@ fn send(rpc: &Rpc, payer: &Keypair, action: &Action, priority_fee: u64) -> Resul
     }
     // Simulate (so program errors come back with their logs), then rebroadcast every 2 s until
     // confirmed or 30 s pass: a dropped send costs seconds instead of a minute.
-    let sim = rpc.0.simulate_transaction(&tx).map_err(|e| format!("{e:?}"))?.value;
+    let sim = rpc
+        .0
+        .simulate_transaction_with_config(
+            &tx,
+            // Simulate on the node's own blockhash: ours may be newer than what that node has seen.
+            solana_rpc_client_api::config::RpcSimulateTransactionConfig {
+                sig_verify: false,
+                replace_recent_blockhash: true,
+                ..Default::default()
+            },
+        )
+        .map_err(|e| format!("{e:?}"))?
+        .value;
     if let Some(err) = sim.err {
         return Err(format!("simulation failed: {err:?} logs: Some([{}])", sim.logs.unwrap_or_default().join(", ")));
     }
