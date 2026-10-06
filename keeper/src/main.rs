@@ -55,7 +55,7 @@ use solana_transaction::Transaction;
 
 const COMPUTE_BUDGET: Pubkey = anchor_lang::prelude::pubkey!("ComputeBudget111111111111111111111111111111");
 const CLOCK_SYSVAR: Pubkey = anchor_lang::prelude::pubkey!("SysvarC1ock11111111111111111111111111111111");
-const POKE_EVERY: Duration = Duration::from_secs(40);
+const POKE_EVERY: Duration = Duration::from_secs(30);
 const RELIST_EVERY: Duration = Duration::from_secs(600);
 const TICK: Duration = Duration::from_secs(1);
 // How often a requested switch is retried until it lands (the deadline is 10 minutes).
@@ -240,6 +240,74 @@ fn send(rpc: &Rpc, payer: &Keypair, action: &Action, priority_fee: u64) -> Resul
 }
 
 /// Pokes every listed quote and the coin's pool.
+/// Sends small independent transactions all at once and waits for them together (pokes): a
+/// round takes seconds instead of a confirmation wait per transaction. Each result is the
+/// signature, or why it failed (simulation or on-chain).
+fn send_many(rpc: &Rpc, payer: &Keypair, actions: &[&Action], priority_fee: u64) -> Vec<Result<String, String>> {
+    let blockhash = match rpc.0.get_latest_blockhash() {
+        Ok(b) => b,
+        Err(e) => return actions.iter().map(|_| Err(e.to_string())).collect(),
+    };
+    let mut out: Vec<Option<Result<String, String>>> = vec![None; actions.len()];
+    let mut txs = vec![];
+    for (k, action) in actions.iter().enumerate() {
+        let mut ixs = vec![Instruction {
+            program_id: COMPUTE_BUDGET,
+            accounts: vec![],
+            data: [vec![2u8], cu_limit(action.label).to_le_bytes().to_vec()].concat(),
+        }];
+        if priority_fee > 0 {
+            ixs.push(Instruction {
+                program_id: COMPUTE_BUDGET,
+                accounts: vec![],
+                data: [vec![3u8], priority_fee.to_le_bytes().to_vec()].concat(),
+            });
+        }
+        ixs.extend(action.ixs.iter().cloned());
+        let tx = Transaction::new_signed_with_payer(&ixs, Some(&payer.pubkey()), &[payer], blockhash);
+        // Preflight catches program errors (a bad quote) right away. Paced, and retried when the
+        // RPC says it's getting too many requests.
+        let mut sent = rpc.0.send_transaction(&tx);
+        for wait in [1000, 2000, 4000] {
+            match &sent {
+                Err(e) if e.to_string().contains("429") => {
+                    sleep(Duration::from_millis(wait));
+                    sent = rpc.0.send_transaction(&tx);
+                }
+                _ => break,
+            }
+        }
+        match sent {
+            Ok(_) => txs.push((k, tx)),
+            Err(e) => out[k] = Some(Err(format!("simulation failed: {e}"))),
+        }
+        sleep(Duration::from_millis(150));
+    }
+    let started = Instant::now();
+    while !txs.is_empty() && started.elapsed() < Duration::from_secs(30) {
+        sleep(Duration::from_millis(1500));
+        let sigs: Vec<_> = txs.iter().map(|(_, t)| t.signatures[0]).collect();
+        let statuses = rpc.0.get_signature_statuses(&sigs).map(|r| r.value).unwrap_or_default();
+        let mut pending = vec![];
+        for (n, (k, tx)) in txs.into_iter().enumerate() {
+            match statuses.get(n).cloned().flatten() {
+                Some(st) if st.err.is_some() => out[k] = Some(Err(format!("failed on-chain: {:?}", st.err))),
+                Some(st) if st.satisfies_commitment(CommitmentConfig::confirmed()) => out[k] = Some(Ok(tx.signatures[0].to_string())),
+                _ => {
+                    // Rebroadcast what hasn't landed yet.
+                    let _ = rpc.0.send_transaction_with_config(
+                        &tx,
+                        solana_rpc_client_api::config::RpcSendTransactionConfig { skip_preflight: true, max_retries: Some(0), ..Default::default() },
+                    );
+                    pending.push((k, tx));
+                }
+            }
+        }
+        txs = pending;
+    }
+    out.into_iter().map(|r| r.unwrap_or_else(|| Err("unable to confirm transaction within 30 s".into()))).collect()
+}
+
 fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
     let crank = Crank::new(rpc, payer.pubkey());
     let c = crank.config();
@@ -254,29 +322,19 @@ fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
             (crank.poke_quotes(&entries).remove(0), chunk.to_vec())
         })
         .collect();
-    // The coin's own pool first: quote batches that need retries can stretch a round past the
-    // two minutes after which the program restarts an average (and waits out a 10-minute
-    // warm-up before it lets a switch pull).
     if let Some(p) = crank.poke_pool() {
         actions.insert(0, (p, vec![]));
     }
     let (mut ok, mut failed) = (0, 0);
-    for (a, chunk) in &actions {
-        match send(rpc, payer, a, fee) {
+    let results = send_many(rpc, payer, &actions.iter().map(|a| &a.0).collect::<Vec<_>>(), fee);
+    // One bad quote fails its whole batch: retry those singly so the rest stay fresh, and name it.
+    let mut singles: Vec<(Action, Pubkey)> = vec![];
+    for ((a, chunk), r) in actions.iter().zip(results) {
+        match r {
             Ok(_) => ok += 1,
-            // One bad quote fails its whole batch: retry singly so the rest stay fresh, and name it.
             Err(e) if chunk.len() > 1 => {
                 log(&format!("poke batch failed, retrying singly: {}", first_line(&e)));
-                for q in chunk {
-                    let single = crank.poke_quotes(&[(*q).clone()]).remove(0);
-                    match send(rpc, payer, &single, fee) {
-                        Ok(_) => ok += 1,
-                        Err(e) => {
-                            failed += 1;
-                            log(&format!("poke {} failed: {}", q.mint, first_line(&e)));
-                        }
-                    }
-                }
+                singles.extend(chunk.iter().map(|q| (crank.poke_quotes(&[(*q).clone()]).remove(0), q.mint)));
             }
             Err(e) => {
                 failed += 1;
@@ -284,8 +342,43 @@ fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
             }
         }
     }
+    if !singles.is_empty() {
+        let results = send_many(rpc, payer, &singles.iter().map(|s| &s.0).collect::<Vec<_>>(), fee);
+        for ((_, mint), r) in singles.iter().zip(results) {
+            match r {
+                Ok(_) => ok += 1,
+                Err(e) => {
+                    failed += 1;
+                    log(&format!("poke {mint} failed: {}", first_line(&e)));
+                }
+            }
+        }
+    }
     if failed > 0 || ok > 0 {
         log(&format!("poked {} quotes + pool ({ok} tx ok, {failed} failed)", live.len()));
+    }
+}
+
+/// Keeps every average fresh on its own clock, so switch retries never delay it: an average
+/// poked more than two minutes apart restarts and needs ten minutes to warm up again.
+fn poke_loop(url: String, payer: Keypair, fee: u64) {
+    let rpc = Rpc(RpcClient::new_with_commitment(url, CommitmentConfig::confirmed()));
+    let mut quotes = rpc.quote_entries();
+    let mut last_list = Instant::now();
+    loop {
+        if last_list.elapsed() >= RELIST_EVERY {
+            let fresh = rpc.quote_entries();
+            if !fresh.is_empty() {
+                quotes = fresh;
+            }
+            last_list = Instant::now();
+        }
+        let started = Instant::now();
+        let round = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| poke_round(&rpc, &payer, &quotes, fee)));
+        if round.is_err() {
+            log("poke round failed to read state; retrying");
+        }
+        sleep(POKE_EVERY.saturating_sub(started.elapsed()));
     }
 }
 
@@ -443,17 +536,13 @@ fn main() {
 
     let mut last_claim = None::<Instant>;
     let mut last_try = None::<Instant>;
-    let mut quotes = rpc.quote_entries();
-    let (mut last_poke, mut last_list) = (None::<Instant>, Instant::now());
+    if cmd == "once" {
+        poke_round(&rpc, &payer, &rpc.quote_entries(), o.priority_fee);
+    } else {
+        let (url, poker, fee) = (o.rpc.clone(), payer.insecure_clone(), o.priority_fee);
+        std::thread::spawn(move || poke_loop(url, poker, fee));
+    }
     loop {
-        if last_list.elapsed() >= RELIST_EVERY {
-            quotes = rpc.quote_entries();
-            last_list = Instant::now();
-        }
-        if last_poke.is_none_or(|t| t.elapsed() >= POKE_EVERY) {
-            poke_round(&rpc, &payer, &quotes, o.priority_fee);
-            last_poke = Some(Instant::now());
-        }
         crank_round(&rpc, &payer, o.priority_fee, &mut last_try);
         if last_claim.is_none_or(|t| t.elapsed() >= CLAIM_EVERY) {
             if let Some(a) = Crank::new(&rpc, payer.pubkey()).claim_fees() {
