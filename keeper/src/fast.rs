@@ -225,10 +225,11 @@ pub fn try_fast(rpc: &Rpc, payer: &Keypair, fee: u64) -> Result<bool, String> {
     let crank = Crank::new(rpc, me);
     let Some(est) = crank.estimate() else { return Ok(false) };
 
-    for a in crank.fast_prep(&est) {
-        if a.ixs.is_empty() {
-            continue;
-        }
+    // Only token accounts that don't exist yet: the regular poke round keeps every average fresh,
+    // and the pull claims the fees itself, so a retry every few seconds costs one transaction.
+    let prep = crank.missing_accounts(&est);
+    if !prep.is_empty() {
+        let a = chamelequote_crank::Action { label: "prep accounts", ixs: prep, signers: vec![] };
         send(rpc, payer, &a, fee).map_err(|e| format!("{}: {}", a.label, first_line(&e)))?;
     }
 
