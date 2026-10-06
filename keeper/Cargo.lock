@@ -695,12 +695,14 @@ name = "chamelequote-keeper"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "bincode",
  "chamelequote",
  "chamelequote-crank",
  "serde_json",
  "solana-account-decoder-client-types",
  "solana-commitment-config",
  "solana-keypair",
+ "solana-message",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-signer",

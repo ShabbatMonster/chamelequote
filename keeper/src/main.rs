@@ -1,5 +1,9 @@
 //! chamelequote keeper.
 //!
+//! Switches take the fast path (see bundle.rs): one atomic transaction for one-hop routes, two
+//! back-to-back transactions otherwise. If that fails the keeper falls back to sending the steps
+//! one by one.
+//!
 //! Every ~50 s it pokes the price averages of every listed quote and of the coin's own pool (a
 //! switch refuses to trade on an average older than two minutes). Every few seconds it checks
 //! for an in-flight switch and pushes it through pull / hop / reprice / add, cancelling it if it
@@ -7,6 +11,7 @@
 //! tests drive.
 //!
 //!   keeper run    --rpc <url> --keypair <path> [--priority-fee <micro-lamports per CU>]
+//!                 [--fast 0 to always send switch steps one by one]
 //!   keeper once   ...          one poke round + crank until idle, then exit
 //!   keeper status --rpc <url>  print the switch state and how fresh the averages are
 //!
@@ -16,10 +21,14 @@
 //!   keeper list   --routes data/orca-routes.json [--min-tvl-curated 50000] [--min-tvl-custom 250000]
 //!                 [--out docs/quotes.json]   (the listed mints, for the website)
 //!   keeper launch --quote <mint> --price-num <n> --price-den <n>   (raw quote per raw token)
+//!   keeper request --quote <mint>   burn the keypair's coins to request a switch (testing)
 //!   keeper allow  --allowlist data/allowlist.json --routes data/orca-routes.json [--min-tvl 10000]
 //!                 [--out docs/quotes.json]   enable exactly the allowlist (listing what's missing)
 
+mod bundle;
+
 use std::{
+    collections::HashMap,
     thread::sleep,
     time::{Duration, Instant},
 };
@@ -32,7 +41,7 @@ use anchor_lang::{
 use chamelequote::{state::QuoteEntry, ID as PROGRAM_ID};
 use chamelequote::{instructions::InitializeParams, math};
 use chamelequote_crank::{
-    config_pda, initialize_ix, launch_ix, list_quote_ix, quote_pda, set_quote_enabled_ix, Action, Crank, Ledger,
+    config_pda, initialize_ix, launch_ix, list_quote_ix, quote_pda, request_switch_ix, set_quote_enabled_ix, Action, Crank, Ledger,
     QUOTE_ENTRY_DISCRIMINATOR,
 };
 use solana_account_decoder_client_types::UiAccountEncoding;
@@ -50,7 +59,10 @@ const COMPUTE_BUDGET: Pubkey = anchor_lang::prelude::pubkey!("ComputeBudget11111
 const CLOCK_SYSVAR: Pubkey = anchor_lang::prelude::pubkey!("SysvarC1ock11111111111111111111111111111111");
 const POKE_EVERY: Duration = Duration::from_secs(50);
 const RELIST_EVERY: Duration = Duration::from_secs(600);
-const TICK: Duration = Duration::from_secs(4);
+const TICK: Duration = Duration::from_secs(1);
+// The program stops refreshing the pool's average once a switch is requested, so the pull must
+// happen within ~2 minutes of the request: one fast attempt, then step by step.
+const FAST_ATTEMPTS: u32 = 1;
 const CLAIM_EVERY: Duration = Duration::from_secs(900);
 
 // Mainnet defaults for `init`.
@@ -103,6 +115,8 @@ struct Opts {
     rpc: String,
     keypair: Option<String>,
     priority_fee: u64,
+    /// Fast switches (one or two transactions); off sends every step separately.
+    fast: bool,
     /// Everything else, by flag name (for the admin commands).
     extra: std::collections::HashMap<String, String>,
 }
@@ -122,7 +136,23 @@ impl Opts {
     }
 }
 
+/// Masks `api-key=...` (and similar query secrets) so RPC errors never print keys.
+fn redact(msg: &str) -> String {
+    let mut out = String::with_capacity(msg.len());
+    let mut rest = msg;
+    while let Some(i) = rest.find("api-key=").or_else(|| rest.find("api_key=")) {
+        out.push_str(&rest[..i + 8]);
+        out.push_str("***");
+        rest = &rest[i + 8..];
+        let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '-')).unwrap_or(rest.len());
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn log(msg: &str) {
+    let msg = &redact(msg);
     let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     println!("[{:02}:{:02}:{:02}Z] {msg}", (t / 3600) % 24, (t / 60) % 60, t % 60);
 }
@@ -153,7 +183,36 @@ fn send(rpc: &Rpc, payer: &Keypair, action: &Action, priority_fee: u64) -> Resul
     let mut signers: Vec<&Keypair> = vec![payer];
     signers.extend(action.signers.iter());
     let tx = Transaction::new_signed_with_payer(&ixs, Some(&payer.pubkey()), &signers, blockhash);
-    rpc.0.send_and_confirm_transaction(&tx).map(|s| s.to_string()).map_err(|e| format!("{e:?}"))
+    // Simulate (so program errors come back with their logs), then rebroadcast every 2 s until
+    // confirmed or 30 s pass: a dropped send costs seconds instead of a minute.
+    let sim = rpc.0.simulate_transaction(&tx).map_err(|e| format!("{e:?}"))?.value;
+    if let Some(err) = sim.err {
+        return Err(format!("simulation failed: {err:?} logs: Some([{}])", sim.logs.unwrap_or_default().join(", ")));
+    }
+    let sig = tx.signatures[0];
+    let started = Instant::now();
+    loop {
+        let _ = rpc.0.send_transaction_with_config(
+            &tx,
+            solana_rpc_client_api::config::RpcSendTransactionConfig { skip_preflight: true, max_retries: Some(0), ..Default::default() },
+        );
+        for _ in 0..4 {
+            sleep(Duration::from_millis(500));
+            if let Ok(st) = rpc.0.get_signature_statuses(&[sig]) {
+                if let Some(Some(s)) = st.value.first() {
+                    if let Some(err) = &s.err {
+                        return Err(format!("failed on-chain: {err:?}"));
+                    }
+                    if s.satisfies_commitment(CommitmentConfig::confirmed()) {
+                        return Ok(sig.to_string());
+                    }
+                }
+            }
+        }
+        if started.elapsed() > Duration::from_secs(30) {
+            return Err("unable to confirm transaction within 30 s".into());
+        }
+    }
 }
 
 /// Pokes every listed quote and the coin's pool.
@@ -204,7 +263,27 @@ fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
 }
 
 /// Pushes an in-flight switch forward until idle or a step fails. Returns steps sent.
-fn crank_round(rpc: &Rpc, payer: &Keypair, fee: u64) -> usize {
+/// A fresh request goes as one Jito bundle (a few attempts); anything else, or a request whose
+/// bundles keep missing, goes step by step.
+fn crank_round(rpc: &Rpc, payer: &Keypair, fee: u64, fast: bool, attempts: &mut HashMap<i64, u32>) -> usize {
+    if fast {
+        let state = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Crank::new(rpc, payer.pubkey()).config()));
+        if let Ok(c) = state {
+            let fresh = c.switch.phase == chamelequote::state::Phase::Requested && rpc.now() <= c.switch.deadline;
+            let tries = attempts.entry(c.switch.deadline).or_insert(0);
+            if fresh && *tries < FAST_ATTEMPTS {
+                *tries += 1;
+                match bundle::try_fast(rpc, payer, fee) {
+                    Ok(true) => {
+                        log("switch done on the fast path");
+                        return 1;
+                    }
+                    Ok(false) => {}
+                    Err(e) => log(&format!("fast path failed, going step by step: {}", first_line(&e))),
+                }
+            }
+        }
+    }
     let mut sent = 0;
     for _ in 0..24 {
         let next = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Crank::new(rpc, payer.pubkey()).next()));
@@ -273,6 +352,7 @@ fn parse() -> (String, Opts) {
         rpc: std::env::var("RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".into()),
         keypair: std::env::var("KEEPER_KEYPAIR").ok(),
         priority_fee: 0,
+        fast: true,
         extra: Default::default(),
     };
     while let Some(a) = args.next() {
@@ -281,6 +361,7 @@ fn parse() -> (String, Opts) {
             "--rpc" => o.rpc = val(),
             "--keypair" => o.keypair = Some(val()),
             "--priority-fee" => o.priority_fee = val().parse().expect("--priority-fee takes a number"),
+            "--fast" => o.fast = val() != "0",
             other if other.starts_with("--") => {
                 let v = val();
                 o.extra.insert(other[2..].to_string(), v);
@@ -296,7 +377,7 @@ fn main() {
     let rpc = Rpc(RpcClient::new_with_commitment(o.rpc.clone(), CommitmentConfig::confirmed()));
     match cmd.as_str() {
         "status" => return status(&rpc),
-        "run" | "once" | "init" | "list" | "launch" | "allow" => {}
+        "run" | "once" | "init" | "list" | "launch" | "allow" | "request" => {}
         _ => {
             println!("usage: keeper run|once|status|init|list|launch --rpc <url> --keypair <path> ... (see source header)");
             return;
@@ -315,6 +396,12 @@ fn main() {
         "list" => return admin_list(&rpc, &payer, &o),
         "launch" => return admin_launch(&rpc, &payer, &o),
         "allow" => return admin_allow(&rpc, &payer, &o),
+        "request" => {
+            // Burns the keypair's own coins: a holder's switch request, for testing and ops.
+            let c = Crank::new(&rpc, payer.pubkey()).config();
+            let ix = request_switch_ix(&payer.pubkey(), &c, &o.pubkey("quote"));
+            return send_ixs(&rpc, &payer, "request switch", vec![ix], vec![], o.priority_fee);
+        }
         _ => {}
     }
     if rpc.account(&config_pda()).is_none() {
@@ -323,6 +410,7 @@ fn main() {
     }
 
     let mut last_claim = None::<Instant>;
+    let mut attempts: HashMap<i64, u32> = HashMap::new();
     let mut quotes = rpc.quote_entries();
     let (mut last_poke, mut last_list) = (None::<Instant>, Instant::now());
     loop {
@@ -334,7 +422,7 @@ fn main() {
             poke_round(&rpc, &payer, &quotes, o.priority_fee);
             last_poke = Some(Instant::now());
         }
-        crank_round(&rpc, &payer, o.priority_fee);
+        crank_round(&rpc, &payer, o.priority_fee, o.fast, &mut attempts);
         if last_claim.is_none_or(|t| t.elapsed() >= CLAIM_EVERY) {
             if let Some(a) = Crank::new(&rpc, payer.pubkey()).claim_fees() {
                 match send(&rpc, &payer, &a, o.priority_fee) {

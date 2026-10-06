@@ -14,6 +14,12 @@ if (Get-Process chamelequote-keeper -ErrorAction SilentlyContinue) {
     Write-Output "keeper is already running"
     exit 0
 }
+# Keep the previous run's log (Start-Process can only overwrite).
+$log = Join-Path $dir "keeper.log"
+if (Test-Path $log) {
+    $stamp = (Get-Item $log).LastWriteTime.ToString("yyyyMMdd-HHmmss")
+    Move-Item $log (Join-Path $dir "keeper.$stamp.log") -Force
+}
 Start-Process -FilePath $exe -WindowStyle Hidden `
     -ArgumentList @("run", "--rpc", $rpc, "--keypair", (Join-Path $dir "keeper.json"), "--priority-fee", "10000") `
     -RedirectStandardOutput (Join-Path $dir "keeper.log") `

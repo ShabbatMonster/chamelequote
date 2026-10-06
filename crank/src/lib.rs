@@ -324,16 +324,31 @@ impl<'a, L: Ledger> Crank<'a, L> {
     }
 
     pub fn hop_ix(&self, via: Pubkey) -> Instruction {
+        self.hop_ix_from(self.config().switch.holding, via)
+    }
+
+    /// A hop that trades `holding` through `via`'s route pool.
+    pub fn hop_ix_from(&self, holding: Pubkey, via: Pubkey) -> Instruction {
+        self.hop_ix_arrays(holding, via, false)
+    }
+
+    /// `compact`: pass only the tick array holding the current price (as all three). Enough when
+    /// the swap stays inside it, and saves two accounts; if it doesn't, the transaction fails in
+    /// simulation and the caller uses the full set.
+    pub fn hop_ix_arrays(&self, holding: Pubkey, via: Pubkey, compact: bool) -> Instruction {
         let c = self.config();
         let route = self.quote(&via).route_pool;
-        let a_to_b = self.pool(&route).expect("route pool missing").mint_a == c.switch.holding;
-        let ta = self.swap_arrays(&route, a_to_b);
+        let a_to_b = self.pool(&route).expect("route pool missing").mint_a == holding;
+        let mut ta = self.swap_arrays(&route, a_to_b);
+        if compact {
+            ta = [ta[0]; 3];
+        }
         Instruction {
             program_id: PROGRAM_ID,
             accounts: accounts::Hop {
                 config: config_pda(),
                 authority: authority(),
-                holding: quote_pda(&c.switch.holding),
+                holding: quote_pda(&holding),
                 target: quote_pda(&c.switch.target),
                 via: quote_pda(&via),
                 pool: self.pool_sides(&route),
@@ -576,5 +591,299 @@ pub fn set_quote_enabled_ix(admin: &Pubkey, mint: &Pubkey, enabled: bool) -> Ins
         program_id: PROGRAM_ID,
         accounts: accounts::AdminQuote { admin: *admin, config: config_pda(), quote: quote_pda(mint) }.to_account_metas(None),
         data: instruction::SetQuoteEnabled { enabled }.data(),
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Atomic switches (Jito bundles)
+
+/// Where an in-flight request is expected to land, worked out before anything moves.
+#[derive(Clone, Debug)]
+pub struct Estimate {
+    /// (holding, via) for each hop, in order.
+    pub hops: Vec<(Pubkey, Pubkey)>,
+    pub target_pool: Pubkey,
+    /// Expected target price, pool orientation.
+    pub pool_sqrt: u128,
+    /// Ticks of the two positions `add` is expected to open (lower, upper, has liquidity).
+    pub positions: [(i32, i32, bool); 2],
+}
+
+impl<'a, L: Ledger> Crank<'a, L> {
+    /// Mirrors the program's hop rule from any holding.
+    fn via_from(&self, holding: &Pubkey, target: &QuoteEntry, usdc: &Pubkey) -> Pubkey {
+        let h = self.quote(holding);
+        let is_ancestor =
+            |m: &Pubkey| (*m == target.hub && !target.is_root()) || (*m == *usdc && target.mint != *usdc);
+        if is_ancestor(&h.mint) {
+            if target.hub == h.mint {
+                target.mint
+            } else {
+                target.hub
+            }
+        } else {
+            h.mint
+        }
+    }
+
+    /// Estimates where a requested switch will land: the price moves by the averages' exchange
+    /// rate less each hop's pool fee. It is off by a fraction of a percent, which only matters if
+    /// it puts a position edge in a different tick array; then the bundle fails harmlessly and the
+    /// keeper falls back to step-by-step.
+    pub fn estimate(&self) -> Option<Estimate> {
+        let c = self.config();
+        if c.switch.phase != Phase::Requested {
+            return None;
+        }
+        let target = self.quote(&c.switch.target);
+        let mut hops = vec![];
+        let mut holding = c.active_quote;
+        let mut fee_keep = 1.0f64;
+        while holding != target.mint {
+            if hops.len() == 3 {
+                return None;
+            }
+            let via = self.via_from(&holding, &target, &c.usdc);
+            let v = self.quote(&via);
+            fee_keep *= 1.0 - self.pool(&v.route_pool)?.fee_rate as f64 / 1e6;
+            let out = if via == holding { v.hub } else { via };
+            hops.push((holding, via));
+            holding = out;
+        }
+        let old = self.pool(&c.active_pool)?;
+        let old_index_is_a = c.index_is_a(&c.active_quote);
+        let old_index_sqrt = math::flip(old.sqrt_price, !old_index_is_a);
+        let rate = math::mul_sqrt(c.switch.ema_rate_sqrt, (fee_keep.sqrt() * math::Q64 as f64) as u128);
+        let index_sqrt = math::mul_sqrt(old_index_sqrt, rate);
+        let floor_sqrt = math::mul_sqrt(c.floor_sqrt, rate);
+        let index_is_a = c.index_is_a(&target.mint);
+        let (a, b) = if index_is_a { (c.mint, target.mint) } else { (target.mint, c.mint) };
+        let target_pool = wp::whirlpool_address(&c.whirlpools_config, &a, &b, c.tick_spacing);
+        let pool_sqrt = math::flip(index_sqrt, !index_is_a);
+        let est = PoolState {
+            whirlpools_config: c.whirlpools_config,
+            tick_spacing: c.tick_spacing,
+            fee_rate: 0,
+            liquidity: 0,
+            sqrt_price: pool_sqrt,
+            tick_current: math::tick_at_sqrt_price(pool_sqrt),
+            mint_a: a,
+            vault_a: Pubkey::default(),
+            mint_b: b,
+            vault_b: Pubkey::default(),
+        };
+        // Only whether each side is non-empty matters for the ticks.
+        let (old_index_vault, old_quote_vault) = if old_index_is_a { (old.vault_a, old.vault_b) } else { (old.vault_b, old.vault_a) };
+        let index_side = self.balance(&self.ours(&c.mint)) + self.balance(&old_index_vault);
+        let quote_side = self.balance(&old_quote_vault);
+        let plan = plan_positions(index_is_a, &est, floor_sqrt, index_side.max(1), quote_side);
+        Some(Estimate { hops, target_pool, pool_sqrt, positions: plan.map(|p| (p.0, p.1, p.2 > 0)) })
+    }
+
+    /// Step one of an atomic switch: everything the bundle needs, created up front with normal
+    /// transactions. None of it touches liquidity.
+    pub fn bundle_prep(&self, e: &Estimate) -> Vec<Action> {
+        let c = self.config();
+        let mut out = vec![];
+        // Fresh averages for every pool the bundle reads.
+        let mut entries = vec![self.quote(&c.active_quote)];
+        for (_, via) in &e.hops {
+            entries.push(self.quote(via));
+        }
+        out.extend(self.poke_quotes(&entries));
+        out.extend(self.poke_pool());
+        // Token accounts: ours along the path, and the fee recipient's for the pool being left.
+        let mut mints = vec![c.mint, c.switch.target];
+        for (holding, via) in &e.hops {
+            mints.push(*holding);
+            let v = self.quote(via);
+            mints.push(if *via == *holding { v.hub } else { *via });
+        }
+        mints.sort();
+        mints.dedup();
+        let mut ixs = self.ensure_ours(&mints);
+        if c.fee_share_bps > 0 {
+            if let Some(p) = self.pool(&c.active_pool) {
+                for m in [p.mint_a, p.mint_b] {
+                    ixs.push(create_ata_ix(&self.cranker, &c.fee_recipient, &m, &self.token_program(&m)));
+                }
+            }
+        }
+        out.push(Action::new("prep accounts", ixs));
+        if self.pool(&e.target_pool).is_none() {
+            let (a, b) = if c.index_is_a(&c.switch.target) { (c.mint, c.switch.target) } else { (c.switch.target, c.mint) };
+            let (va, vb) = (Keypair::new(), Keypair::new());
+            let ix = wp::initialize_pool_ix(
+                c.whirlpools_config,
+                a,
+                b,
+                self.token_program(&a),
+                self.token_program(&b),
+                self.cranker,
+                va.pubkey(),
+                vb.pubkey(),
+                c.tick_spacing,
+                e.pool_sqrt,
+            );
+            out.push(Action { label: "create pool", ixs: vec![ix], signers: vec![va, vb] });
+        }
+        let ts = c.tick_spacing as i32;
+        let mut starts: Vec<i32> = e
+            .positions
+            .iter()
+            .filter(|p| p.2)
+            .flat_map(|p| [math::tick_array_start(p.0, ts), math::tick_array_start(p.1, ts)])
+            .collect();
+        starts.sort();
+        starts.dedup();
+        let tick_ixs: Vec<_> = starts.iter().map(|s| wp::init_tick_array_ix(e.target_pool, self.cranker, *s)).collect();
+        out.push(Action::new("prep tick arrays", tick_ixs));
+        out
+    }
+
+    /// Step two: the switch itself, one instruction list per transaction (pull, each hop, then
+    /// reprice + add together). Call after the prep has landed: it reads the target pool.
+    pub fn bundle_txs(&self, e: &Estimate) -> Vec<Vec<Instruction>> {
+        self.switch_steps(e, false)
+    }
+
+    /// The switch as steps (pull, each hop, reprice + add). `compact` trims every swap to the one
+    /// tick array holding the current price, so more steps fit in a single 64-account
+    /// transaction.
+    pub fn switch_steps(&self, e: &Estimate, compact: bool) -> Vec<Vec<Instruction>> {
+        let c = self.config();
+        let mut txs = vec![vec![self.pull_ix()]];
+        for (holding, via) in &e.hops {
+            txs.push(vec![self.hop_ix_arrays(*holding, *via, compact)]);
+        }
+        let pool = self.pool(&e.target_pool).expect("target pool missing");
+        let ts = pool.tick_spacing as i32;
+        let span = ts * math::TICK_ARRAY_SIZE;
+        let start = math::tick_array_start(pool.tick_current, ts);
+        // The pool sits at or near the estimate and the real target is a hair away in either
+        // direction, so hand Orca the arrays on both sides.
+        let arrays = if compact {
+            [wp::tick_array_address(&e.target_pool, start); 3]
+        } else {
+            [start, start - span, start + span].map(|s| wp::tick_array_address(&e.target_pool, s))
+        };
+        let reprice = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: accounts::Reprice {
+                config: config_pda(),
+                authority: authority(),
+                pool: self.pool_sides(&e.target_pool),
+                tick_array_0: arrays[0],
+                tick_array_1: arrays[1],
+                tick_array_2: arrays[2],
+                oracle: wp::oracle_address(&e.target_pool),
+                memo_program: wp::MEMO_ID,
+                whirlpool_program: wp::WHIRLPOOL_ID,
+            }
+            .to_account_metas(None),
+            data: instruction::Reprice {}.data(),
+        };
+        let add = Instruction {
+            program_id: PROGRAM_ID,
+            accounts: accounts::Add {
+                funder: self.cranker,
+                config: config_pda(),
+                authority: authority(),
+                positions: self.positions(&e.target_pool, e.positions.map(|p| Some((p.0, p.1)))),
+                pool: self.pool_sides(&e.target_pool),
+                escrow: escrow(),
+                mint: c.mint,
+                token_program: TOKEN_PROGRAM,
+                token_2022_program: wp::TOKEN_2022_ID,
+                system_program: system_program::ID,
+                associated_token_program: wp::ATA_PROGRAM_ID,
+                memo_program: wp::MEMO_ID,
+                nft_update_auth: wp::NFT_UPDATE_AUTH,
+                whirlpool_program: wp::WHIRLPOOL_ID,
+            }
+            .to_account_metas(None),
+            data: instruction::Add {}.data(),
+        };
+        txs.push(vec![reprice, add]);
+        txs
+    }
+}
+
+/// A holder's switch request (burns `burn_amount` of the coin into escrow).
+pub fn request_switch_ix(user: &Pubkey, config: &Config, target: &Pubkey) -> Instruction {
+    Instruction {
+        program_id: PROGRAM_ID,
+        accounts: accounts::RequestSwitch {
+            user: *user,
+            config: config_pda(),
+            mint: config.mint,
+            user_token: wp::ata(user, &config.mint, &TOKEN_PROGRAM),
+            escrow: escrow(),
+            old_quote: quote_pda(&config.active_quote),
+            new_quote: quote_pda(target),
+            wsol_quote: quote_pda(&config.wsol),
+            token_program: TOKEN_PROGRAM,
+        }
+        .to_account_metas(None),
+        data: instruction::RequestSwitch {}.data(),
+    }
+}
+
+impl<'a, L: Ledger> Crank<'a, L> {
+    /// Second half of a two-transaction switch, built once the pull and hops have landed (phase
+    /// Repricing): tick arrays for the final positions (idempotent), the reprice if the pool is
+    /// not at the target yet, and the add, all in one transaction. Positions are planned at the
+    /// exact target price, which is where `add` will see the pool after the reprice.
+    pub fn finish_ixs(&self) -> Option<Vec<Instruction>> {
+        let c = self.config();
+        if c.switch.phase != Phase::Repricing {
+            return None;
+        }
+        let (pool_key, target_sqrt) = self.target_pool();
+        let current = self.pool(&pool_key)?;
+        let at_target = PoolState { sqrt_price: target_sqrt, tick_current: math::tick_at_sqrt_price(target_sqrt), ..current.clone() };
+        let index_is_a = c.index_is_a(&c.switch.target);
+        let ours = self.pool_sides(&pool_key);
+        let (ours_index, ours_quote) = if index_is_a { (ours.ours_a, ours.ours_b) } else { (ours.ours_b, ours.ours_a) };
+        let plan = plan_positions(index_is_a, &at_target, c.switch.target_floor_sqrt, self.balance(&ours_index), self.balance(&ours_quote));
+        let ts = current.tick_spacing as i32;
+        let mut starts: Vec<i32> = plan
+            .iter()
+            .filter(|p| p.2 > 0)
+            .flat_map(|p| [math::tick_array_start(p.0, ts), math::tick_array_start(p.1, ts)])
+            .collect();
+        starts.sort();
+        starts.dedup();
+        let mut ixs: Vec<Instruction> = starts.iter().map(|s| wp::init_tick_array_ix(pool_key, self.cranker, *s)).collect();
+        if current.sqrt_price != target_sqrt {
+            ixs.push(self.reprice_ix());
+        }
+        ixs.push(self.add_ix_planned(&pool_key, plan));
+        Some(ixs)
+    }
+
+    fn add_ix_planned(&self, pool_key: &Pubkey, plan: [(i32, i32, u128); 2]) -> Instruction {
+        let c = self.config();
+        Instruction {
+            program_id: PROGRAM_ID,
+            accounts: accounts::Add {
+                funder: self.cranker,
+                config: config_pda(),
+                authority: authority(),
+                positions: self.positions(pool_key, plan.map(|p| Some((p.0, p.1)))),
+                pool: self.pool_sides(pool_key),
+                escrow: escrow(),
+                mint: c.mint,
+                token_program: TOKEN_PROGRAM,
+                token_2022_program: wp::TOKEN_2022_ID,
+                system_program: system_program::ID,
+                associated_token_program: wp::ATA_PROGRAM_ID,
+                memo_program: wp::MEMO_ID,
+                nft_update_auth: wp::NFT_UPDATE_AUTH,
+                whirlpool_program: wp::WHIRLPOOL_ID,
+            }
+            .to_account_metas(None),
+            data: instruction::Add {}.data(),
+        }
     }
 }

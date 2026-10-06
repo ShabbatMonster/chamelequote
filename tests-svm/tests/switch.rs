@@ -349,3 +349,146 @@ fn claim_fees_pays_the_recipient_without_touching_liquidity() {
     env.send(&action.ixs, &[&cranker]).unwrap();
     assert_eq!(env.balance(&fee_ata) as f64 / 1e6, got);
 }
+
+/// The keeper's atomic path: prep, then pull + hops + (reprice + add) as one bundle. Here the
+/// bundle's transactions go in back to back; on mainnet Jito lands them in one block.
+fn bundled_switch(env: &mut Env, target: anchor_lang::prelude::Pubkey) -> usize {
+    let cranker = env.funded();
+    let est = env.crank_as(&cranker.pubkey()).estimate().expect("a requested switch to estimate");
+    let prep = env.crank_as(&cranker.pubkey()).bundle_prep(&est);
+    for a in prep {
+        let mut signers: Vec<&Kp> = vec![&cranker];
+        signers.extend(a.signers.iter());
+        env.send(&a.ixs, &signers).unwrap_or_else(|e| panic!("{}: {e}", a.label));
+    }
+    let txs = env.crank_as(&cranker.pubkey()).bundle_txs(&est);
+    assert!(txs.len() <= 5, "Jito bundles hold at most 5 transactions, planned {}", txs.len());
+    for (i, ixs) in txs.iter().enumerate() {
+        env.send(ixs, &[&cranker]).unwrap_or_else(|e| panic!("bundle tx {i}: {e}"));
+    }
+    let c = env.config();
+    assert_eq!(c.switch.phase, Phase::Idle, "switch should be complete after the bundle");
+    assert_eq!(c.active_quote, target);
+    txs.len()
+}
+
+#[test]
+fn bundled_switch_completes_in_one_pass() {
+    for order in ORDERS {
+        let (mut env, whale) = traded_ordered(order);
+        let (x, y, usdc) = (env.x, env.y, env.usdc);
+        let usd0 = env.index_usd();
+
+        env.request(&whale, x).unwrap();
+        assert_eq!(bundled_switch(&mut env, x), 3, "pull, 1 hop, reprice+add");
+        assert_close(env.index_usd(), usd0, 0.01, "after bundled USDC -> X");
+        env.keep(660);
+
+        env.request(&whale, y).unwrap();
+        assert_eq!(bundled_switch(&mut env, y), 5, "pull, 3 hops, reprice+add");
+        assert_close(env.index_usd(), usd0, 0.02, "after bundled X -> Y");
+        env.keep(660);
+
+        // Back into an existing, emptied pool.
+        env.request(&whale, usdc).unwrap();
+        bundled_switch(&mut env, usdc);
+        assert_close(env.index_usd(), usd0, 0.03, "after bundled round trip");
+    }
+}
+
+/// How many unique accounts a whole switch touches (mainnet allows 64 per transaction).
+#[test]
+fn report_switch_account_counts() {
+    let (mut env, whale) = traded_ordered(Some(true));
+    let (x, y, wsol) = (env.x, env.y, env.wsol);
+    let _ = y;
+    for (name, target) in [("USDC->X (1 hop)", x), ("X->SOL (2 hops)", wsol), ("SOL->Y (1 hop)", y), ("Y->X (3 hops)", x)] {
+        env.request(&whale, target).unwrap();
+        let cranker = env.funded();
+        let est = env.crank_as(&cranker.pubkey()).estimate().unwrap();
+        for a in env.crank_as(&cranker.pubkey()).bundle_prep(&est) {
+            let mut s: Vec<&Kp> = vec![&cranker];
+            s.extend(a.signers.iter());
+            env.send(&a.ixs, &s).unwrap();
+        }
+        let txs = env.crank_as(&cranker.pubkey()).bundle_txs(&est);
+        let mut keys: Vec<_> = txs.iter().flatten().flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey).chain([ix.program_id])).collect();
+        keys.push(cranker.pubkey());
+        keys.sort();
+        keys.dedup();
+        eprintln!("{name}: {} txs, {} unique accounts (incl. payer + programs)", txs.len(), keys.len());
+        for ixs in &txs {
+            env.send(ixs, &[&cranker]).unwrap();
+        }
+        env.keep(660);
+    }
+}
+
+/// The keeper's fast path. One hop: the whole switch in ONE transaction (compact tick arrays
+/// keep it under 64 accounts). More hops: pull + all hops in one transaction, then reprice + add
+/// in the next, sent the moment the first lands.
+fn fast_switch(env: &mut Env, target: anchor_lang::prelude::Pubkey) -> usize {
+    let cranker = env.funded();
+    let est = env.crank_as(&cranker.pubkey()).estimate().unwrap();
+    for a in env.crank_as(&cranker.pubkey()).bundle_prep(&est) {
+        let mut s: Vec<&Kp> = vec![&cranker];
+        s.extend(a.signers.iter());
+        env.send(&a.ixs, &s).unwrap();
+    }
+    let steps = env.crank_as(&cranker.pubkey()).switch_steps(&est, true);
+    let count = |ixs: &[anchor_lang::solana_program::instruction::Instruction], payer: anchor_lang::prelude::Pubkey| {
+        let mut keys: Vec<_> = ixs.iter().flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey).chain([ix.program_id])).collect();
+        keys.push(payer);
+        keys.push(anchor_lang::prelude::pubkey!("ComputeBudget111111111111111111111111111111"));
+        keys.sort();
+        keys.dedup();
+        keys.len()
+    };
+    let txs: Vec<Vec<_>> = if est.hops.len() <= 1 {
+        vec![steps.into_iter().flatten().collect()]
+    } else {
+        let n = steps.len();
+        vec![steps.into_iter().take(n - 1).flatten().collect()]
+    };
+    let mut sent = 0;
+    for ixs in &txs {
+        let k = count(ixs, cranker.pubkey());
+        env.send(ixs, &[&cranker]).unwrap_or_else(|e| panic!("fast switch tx {sent}: {e}"));
+        eprintln!("  tx {sent}: {k} accounts, {} CU", env.last_cu);
+        assert!(k <= 64 && env.last_cu < 1_400_000);
+        sent += 1;
+    }
+    if est.hops.len() > 1 {
+        let finish = env.crank_as(&cranker.pubkey()).finish_ixs().expect("phase Repricing after the hops");
+        let k = count(&finish, cranker.pubkey());
+        env.send(&finish, &[&cranker]).unwrap_or_else(|e| panic!("finish tx: {e}"));
+        eprintln!("  finish: {k} accounts, {} CU", env.last_cu);
+        assert!(k <= 64 && env.last_cu < 1_400_000);
+        sent += 1;
+    }
+    let c = env.config();
+    assert_eq!(c.switch.phase, Phase::Idle);
+    assert_eq!(c.active_quote, target);
+    sent
+}
+
+#[test]
+fn fast_switch_one_tx_for_one_hop_two_txs_otherwise() {
+    for order in ORDERS {
+        let (mut env, whale) = traded_ordered(order);
+        let (x, wsol, y) = (env.x, env.wsol, env.y);
+        let usd0 = env.index_usd();
+        env.request(&whale, x).unwrap(); // USDC -> X: 1 hop
+        assert_eq!(fast_switch(&mut env, x), 1);
+        env.keep(660);
+        env.request(&whale, wsol).unwrap(); // X -> USDC -> SOL: 2 hops
+        assert_eq!(fast_switch(&mut env, wsol), 2);
+        env.keep(660);
+        env.request(&whale, y).unwrap(); // SOL -> Y: 1 hop
+        assert_eq!(fast_switch(&mut env, y), 1);
+        env.keep(660);
+        env.request(&whale, x).unwrap(); // Y -> SOL -> USDC -> X: 3 hops
+        assert_eq!(fast_switch(&mut env, x), 2);
+        assert_close(env.index_usd(), usd0, 0.03, "after four fast switches");
+    }
+}
