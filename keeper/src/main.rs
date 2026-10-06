@@ -14,6 +14,7 @@
 //!   keeper init   --mint-keypair <path> --name <s> --symbol <s> --uri <url> --supply <raw> --burn <raw>
 //!                 --fee-recipient <pubkey> --fee-share-bps <n>
 //!   keeper list   --routes data/orca-routes.json [--min-tvl-curated 50000] [--min-tvl-custom 250000]
+//!                 [--out docs/quotes.json]   (the listed mints, for the website)
 //!   keeper launch --quote <mint> --price-num <n> --price-den <n>   (raw quote per raw token)
 
 use std::{
@@ -123,11 +124,19 @@ fn log(msg: &str) {
     println!("[{:02}:{:02}:{:02}Z] {msg}", (t / 3600) % 24, (t / 60) % 60, t % 60);
 }
 
+fn cu_limit(label: &str) -> u32 {
+    match label {
+        "poke quotes" | "poke pool" | "claim fees" | "list" | "launch" => 300_000,
+        _ => 1_400_000,
+    }
+}
+
 fn send(rpc: &Rpc, payer: &Keypair, action: &Action, priority_fee: u64) -> Result<String, String> {
     let mut ixs = vec![Instruction {
         program_id: COMPUTE_BUDGET,
         accounts: Vec::<AccountMeta>::new(),
-        data: [vec![2u8], 1_400_000u32.to_le_bytes().to_vec()].concat(),
+        // Priority fees are charged per requested compute unit, so ask only for what a step needs.
+        data: [vec![2u8], cu_limit(action.label).to_le_bytes().to_vec()].concat(),
     }];
     if priority_fee > 0 {
         ixs.push(Instruction {
@@ -141,18 +150,41 @@ fn send(rpc: &Rpc, payer: &Keypair, action: &Action, priority_fee: u64) -> Resul
     let mut signers: Vec<&Keypair> = vec![payer];
     signers.extend(action.signers.iter());
     let tx = Transaction::new_signed_with_payer(&ixs, Some(&payer.pubkey()), &signers, blockhash);
-    rpc.0.send_and_confirm_transaction(&tx).map(|s| s.to_string()).map_err(|e| e.to_string())
+    rpc.0.send_and_confirm_transaction(&tx).map(|s| s.to_string()).map_err(|e| format!("{e:?}"))
 }
 
 /// Pokes every listed quote and the coin's pool.
 fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
     let crank = Crank::new(rpc, payer.pubkey());
-    let mut actions = crank.poke_quotes(quotes);
-    actions.extend(crank.poke_pool());
+    let live: Vec<&QuoteEntry> = quotes.iter().filter(|q| !q.is_root()).collect();
+    let mut actions: Vec<(Action, Vec<&QuoteEntry>)> = live
+        .chunks(12)
+        .map(|chunk| {
+            let entries: Vec<QuoteEntry> = chunk.iter().map(|q| (*q).clone()).collect();
+            (crank.poke_quotes(&entries).remove(0), chunk.to_vec())
+        })
+        .collect();
+    if let Some(p) = crank.poke_pool() {
+        actions.push((p, vec![]));
+    }
     let (mut ok, mut failed) = (0, 0);
-    for a in &actions {
+    for (a, chunk) in &actions {
         match send(rpc, payer, a, fee) {
             Ok(_) => ok += 1,
+            // One bad quote fails its whole batch: retry singly so the rest stay fresh, and name it.
+            Err(e) if chunk.len() > 1 => {
+                log(&format!("poke batch failed, retrying singly: {}", first_line(&e)));
+                for q in chunk {
+                    let single = crank.poke_quotes(&[(*q).clone()]).remove(0);
+                    match send(rpc, payer, &single, fee) {
+                        Ok(_) => ok += 1,
+                        Err(e) => {
+                            failed += 1;
+                            log(&format!("poke {} failed: {}", q.mint, first_line(&e)));
+                        }
+                    }
+                }
+            }
             Err(e) => {
                 failed += 1;
                 log(&format!("{} failed: {}", a.label, first_line(&e)));
@@ -196,7 +228,16 @@ fn first_line(e: &str) -> String {
     if let Some(i) = e.find("Error Code: ") {
         return e[i..].split('.').next().unwrap_or(e).to_string();
     }
-    e.lines().next().unwrap_or(e).chars().take(200).collect()
+    if e.contains("unable to confirm") {
+        return "dropped before confirmation (will retry)".into();
+    }
+    // Simulation failures: the transaction error and the last program log lines say why.
+    if let Some(i) = e.find("err: Some(") {
+        let err: String = e[i + 10..].chars().take_while(|c| *c != ')').collect();
+        let logs = e.find("logs: Some([").map(|j| e[j..].chars().take(600).collect::<String>()).unwrap_or_default();
+        return format!("simulation failed: {err}) {logs}");
+    }
+    e.chars().take(300).collect()
 }
 
 fn status(rpc: &Rpc) {
@@ -256,7 +297,8 @@ fn main() {
     }
     let path = o.keypair.clone().expect("--keypair (or KEEPER_KEYPAIR) is required");
     let payer = read_keypair_file(&path).unwrap_or_else(|e| panic!("could not read keypair {path}: {e}"));
-    log(&format!("keeper {} on {} (program {PROGRAM_ID})", payer.pubkey(), o.rpc));
+    let shown = o.rpc.split('?').next().unwrap_or(&o.rpc); // drop any ?api-key=... from logs
+    log(&format!("keeper {} on {shown} (program {PROGRAM_ID})", payer.pubkey()));
     match rpc.0.get_balance(&payer.pubkey()) {
         Ok(b) => log(&format!("balance {:.4} SOL", b as f64 / 1e9)),
         Err(e) => log(&format!("could not read balance: {e}")),
@@ -371,6 +413,13 @@ fn admin_list(rpc: &Rpc, payer: &Keypair, o: &Opts) {
             Ok(_) => log(&format!("listed {label}")),
             Err(e) => log(&format!("could not list {label}: {}", first_line(&e))),
         }
+    }
+    // The website can't list program accounts through free RPCs, so it reads this file instead.
+    if let Some(out) = o.extra.get("out") {
+        let mut mints: Vec<String> = rpc.quote_entries().iter().map(|q| q.mint.to_string()).collect();
+        mints.sort();
+        std::fs::write(out, serde_json::to_string_pretty(&serde_json::json!({ "quotes": mints })).unwrap()).expect("could not write --out");
+        log(&format!("wrote {} listed quotes to {out}", mints.len()));
     }
 }
 

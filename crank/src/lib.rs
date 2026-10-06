@@ -141,7 +141,7 @@ impl<'a, L: Ledger> Crank<'a, L> {
             .iter()
             .filter(|q| !q.is_root())
             .collect::<Vec<_>>()
-            .chunks(8)
+            .chunks(12)
             .map(|chunk| {
                 let mut metas = accounts::PokeQuotes {}.to_account_metas(None);
                 for q in chunk {

@@ -16,7 +16,6 @@ const METADATA_PROGRAM = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s";
 // Anchor discriminators: sha256("global:<ix>" / "account:<T>" / "event:<E>")[0..8]
 const IX_RENAME = [98, 63, 129, 146, 24, 170, 185, 45];
 const IX_REQUEST_SWITCH = [227, 11, 252, 67, 174, 8, 46, 204];
-const ACC_QUOTE_ENTRY = [41, 127, 200, 196, 31, 228, 133, 255];
 const EVENTS = {
   "148,232,32,179,231,9,232,103": "Renamed",
   "7,223,168,139,165,147,157,170": "Switched",
@@ -120,10 +119,11 @@ export async function connect() {
   return new web3.Connection(CONFIG.RPC_URL, "confirmed");
 }
 
+// Free RPC tiers block large batches (publicnode: under 20 accounts), so fetch 10 at a time.
 async function many(conn, keys) {
-  const out = [];
-  for (let i = 0; i < keys.length; i += 100) out.push(...(await conn.getMultipleAccountsInfo(keys.slice(i, i + 100))));
-  return out;
+  const chunks = [];
+  for (let i = 0; i < keys.length; i += 10) chunks.push(keys.slice(i, i + 10));
+  return (await Promise.all(chunks.map((c) => conn.getMultipleAccountsInfo(c)))).flat();
 }
 
 /** Everything the page shows, in display units. */
@@ -134,10 +134,11 @@ export async function loadState(conn, wallet) {
   const metadata = decodeMetadata(mdAcc.data);
   const supply = Number(new DataView(mintAcc.data.buffer, mintAcc.data.byteOffset).getBigUint64(36, true)) / 1e6;
 
-  const quoteAccs = await conn.getProgramAccounts(programId(), {
-    filters: [{ memcmp: { offset: 0, bytes: bs58(ACC_QUOTE_ENTRY) } }],
-  });
-  const quotes = quoteAccs.map((a) => decodeQuote(a.account.data));
+  // Free RPCs refuse getProgramAccounts from browsers, so the listed mints come from quotes.json
+  // (written by `keeper list --out`) and their entries are fetched directly.
+  const { quotes: mints } = await (await fetch("quotes.json", { cache: "no-cache" })).json();
+  const entryAccs = await many(conn, mints.map((m) => quotePda(pk(m))));
+  const quotes = entryAccs.filter(Boolean).map((a) => decodeQuote(a.data));
   const byMint = new Map(quotes.map((q) => [q.mint.toBase58(), q]));
 
   // USD per whole token, from the on-chain averages.
@@ -177,23 +178,24 @@ export async function loadState(conn, wallet) {
   return state;
 }
 
-// Base58 for the memcmp filter (tiny encoder, avoids another dependency).
-function bs58(bytes) {
-  const A = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-  let n = 0n;
-  for (const b of bytes) n = n * 256n + BigInt(b);
-  let s = "";
-  while (n > 0n) { s = A[Number(n % 58n)] + s; n /= 58n; }
-  for (const b of bytes) { if (b === 0) s = "1" + s; else break; }
-  return s;
-}
-
-/** Renames, switches and aborts from recent program transactions. */
+/**
+ * Renames, switches and aborts from recent transactions. Renames always touch the metadata
+ * account and switch steps that matter touch the escrow, so those two histories cover everything
+ * without wading through the keeper's price updates.
+ */
 export async function loadHappenings(conn, limit = 15) {
-  const sigs = await conn.getSignaturesForAddress(configPda(), { limit: 40 });
+  const mint = pk(CONFIG.MINT);
+  const lists = await Promise.all(
+    [escrowPda(), metadataPda(mint)].map((a) => conn.getSignaturesForAddress(a, { limit }).catch(() => [])),
+  );
+  const seen = new Set();
+  const sigs = lists
+    .flat()
+    .filter((s) => !s.err && !seen.has(s.signature) && seen.add(s.signature))
+    .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
+    .slice(0, limit);
   const out = [];
   for (const s of sigs) {
-    if (out.length >= limit || s.err) continue;
     const tx = await conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0 });
     for (const line of tx?.meta?.logMessages ?? []) {
       if (!line.startsWith("Program data: ")) continue;
@@ -289,4 +291,3 @@ export async function ipfsUpload(blob, filename) {
   return CONFIG.IPFS_GATEWAY + Hash;
 }
 
-export { ACC_QUOTE_ENTRY };
