@@ -462,7 +462,11 @@ async function onRename(e) {
         image = await chain.ipfsUpload(file, file.name);
       }
       say(msg, "Uploading details to IPFS…");
-      const json = new Blob([JSON.stringify({ name, symbol, description, image })], { type: "application/json" });
+      const links = CONFIG.LINKS;
+      const json = new Blob(
+        [JSON.stringify({ name, symbol, description, image, external_url: links.website, ...links, extensions: links })],
+        { type: "application/json" },
+      );
       const uri = await chain.ipfsUpload(json, "metadata.json");
       say(msg, "Waiting for your wallet…");
       const { PublicKey } = await chain.loadWeb3();
