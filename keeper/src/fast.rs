@@ -107,9 +107,20 @@ pub fn ensure_alts(rpc: &Rpc, payer: &Keypair, needed: &[Pubkey], fee: u64) -> R
         let idx = match alts.iter().position(|a| a.addresses.len() < ALT_MAX) {
             Some(i) => i,
             None => {
-                let slot = rpc.0.get_slot().map_err(|e| e.to_string())?.saturating_sub(1);
-                let (key, ix) = create_alt_ix(&me, slot);
-                send(rpc, payer, &chamelequote_crank::Action { label: "create lookup table", ixs: vec![ix], signers: vec![] }, fee)?;
+                // A slot every node has seen: the one checking it may be a few blocks behind ours
+                // (a slot it doesn't know is rejected as invalid instruction data). Once more,
+                // further back, if that still happens.
+                let now = rpc.0.get_slot().map_err(|e| e.to_string())?;
+                let mut created = Err(String::new());
+                for back in [20, 150] {
+                    let (key, ix) = create_alt_ix(&me, now.saturating_sub(back));
+                    let action = chamelequote_crank::Action { label: "create lookup table", ixs: vec![ix], signers: vec![] };
+                    created = send(rpc, payer, &action, fee).map(|_| key).map_err(|e| format!("create lookup table: {e}"));
+                    if created.is_ok() {
+                        break;
+                    }
+                }
+                let key = created?;
                 log(&format!("created lookup table {key}"));
                 alts.push(AddressLookupTableAccount { key, addresses: vec![] });
                 save_alts(&alts);
@@ -119,7 +130,8 @@ pub fn ensure_alts(rpc: &Rpc, payer: &Keypair, needed: &[Pubkey], fee: u64) -> R
         let room = ALT_MAX - alts[idx].addresses.len();
         let chunk: Vec<Pubkey> = missing.drain(..missing.len().min(room).min(20)).collect();
         let ix = extend_alt_ix(&me, &alts[idx].key, &chunk);
-        send(rpc, payer, &chamelequote_crank::Action { label: "extend lookup table", ixs: vec![ix], signers: vec![] }, fee)?;
+        send(rpc, payer, &chamelequote_crank::Action { label: "extend lookup table", ixs: vec![ix], signers: vec![] }, fee)
+            .map_err(|e| format!("extend lookup table: {e}"))?;
         alts[idx].addresses.extend(chunk);
         last_slot = rpc.0.get_slot().map_err(|e| e.to_string())?;
     }
