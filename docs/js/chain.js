@@ -313,22 +313,62 @@ export function requestSwitchIx(user, state, target) {
  * the page hanging after the transaction has already landed). `onSent(signature)` fires as soon
  * as the transaction is submitted. Returns the signature.
  */
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const base58 = (bytes) => {
+  let n = 0n;
+  for (const b of bytes) n = n * 256n + BigInt(b);
+  let out = "";
+  while (n > 0n) {
+    out = B58[Number(n % 58n)] + out;
+    n /= 58n;
+  }
+  for (const b of bytes) {
+    if (b !== 0) break;
+    out = "1" + out;
+  }
+  return out;
+};
+
 export async function sendIx(conn, wallet, ix, onSent = () => {}) {
   const tx = new web3.Transaction().add(web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }), ix);
   tx.feePayer = new web3.PublicKey(wallet.address);
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
   tx.recentBlockhash = blockhash;
   const signed = await wallet.sign(tx);
-  const sig = await conn.sendRawTransaction(signed, { maxRetries: 5 });
+  // The signature is known before sending (first signature in the signed bytes), so whatever the
+  // RPC says while sending or polling, the chain has the last word.
+  const sig = base58(signed.slice(1, 65));
+  let sendError = null;
+  try {
+    await conn.sendRawTransaction(signed, { maxRetries: 5 });
+  } catch (e) {
+    // A busy or lagging public node can reject the send (or its preflight) while the
+    // transaction still lands; only a genuine program error is final.
+    if (/custom program error|insufficient|InstructionError/i.test(String(e?.message ?? e))) throw e;
+    sendError = e;
+  }
   onSent(sig);
+  const started = Date.now();
   for (;;) {
-    const st = (await conn.getSignatureStatuses([sig])).value[0];
+    await new Promise((r) => setTimeout(r, 1500));
+    let st = null;
+    try {
+      st = (await conn.getSignatureStatuses([sig], { searchTransactionHistory: true })).value[0];
+    } catch {
+      continue; // rate limited or a hiccup: ask again
+    }
     if (st?.err) throw new Error(`Transaction failed on-chain: ${JSON.stringify(st.err)}`);
     if (st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") return sig;
-    if ((await conn.getBlockHeight()) > lastValidBlockHeight) {
+    let height = 0;
+    try {
+      height = await conn.getBlockHeight();
+    } catch {
+      continue;
+    }
+    if (height > lastValidBlockHeight || (sendError && Date.now() - started > 30_000)) {
+      if (sendError) throw sendError;
       throw new Error("The transaction expired without landing, so nothing was burned. Try again.");
     }
-    await new Promise((r) => setTimeout(r, 1500));
   }
 }
 

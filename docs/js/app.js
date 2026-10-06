@@ -382,7 +382,7 @@ async function onSwitch() {
       );
       watching = { target: target.mint, sig: sigTx };
       say(msg, `Burn received. Switching to ${target.symbol}; this takes about a minute.`, "", sigTx);
-      await refresh();
+      await refresh().catch(() => {}); // the next poll catches up if the RPC is busy
       pollSwitch();
     }
   } catch (e) {
@@ -397,7 +397,11 @@ async function pollSwitch() {
   const msg = $("switch-msg");
   for (let i = 0; i < 200 && watching; i++) {
     await new Promise((r) => setTimeout(r, 3000));
-    await refresh();
+    try {
+      await refresh();
+    } catch {
+      continue; // a busy public RPC; try again next time round
+    }
     if (view.sw.phase === "Idle") {
       const landed = view.active;
       watching.finished = true;
@@ -466,7 +470,7 @@ async function onRename(e) {
         say(msg, "Sent! Waiting for the network to confirm…", "", s2),
       );
       happeningsCache.at = 0; // show the rename in Recent Happenings right away
-      await refresh();
+      await refresh().catch(() => {}); // the next poll catches up if the RPC is busy
       say(msg, `Done. Say hello to ${name} ($${symbol}). The page header shows it now; wallets and Solscan may take a while to catch up.`, "ok", sig);
       $("rename-form").reset();
       updatePreview();
