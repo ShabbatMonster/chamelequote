@@ -520,7 +520,6 @@ fn add_follows(instructions: &AccountInfo) -> Result<bool> {
 /// Fees earned since the last claim are paid out as usual. Only in a transaction that also
 /// runs `add`: the switch lands whole or not at all.
 pub fn pull<'info>(ctx: Context<'info, Pull<'info>>) -> Result<()> {
-    let now = Clock::get()?.unix_timestamp;
     let config = &ctx.accounts.config;
     require!(config.switch.phase == Phase::Requested, E::WrongPhase);
     let pool_key = ctx.accounts.pool.pool.key();
@@ -531,10 +530,11 @@ pub fn pull<'info>(ctx: Context<'info, Pull<'info>>) -> Result<()> {
     let (state, sides) = ctx.accounts.pool.load(config, &quote, &authority)?;
     let ps = state.ok_or(E::WrongPool)?;
 
-    // Refuse to pull on a price pushed away from its average (the LOOP "block start" check).
+    // Whatever the price is, traded or pushed, carries over: the new pool opens at this price
+    // times the realised exchange rate, on the same curve. Pushing it before a switch and back
+    // after only pays the pool fee twice, so the switch doesn't wait for the price to settle.
+    // (The route pools the backing swaps through are still checked against their averages.)
     let spot = ps.sqrt_price;
-    let ema = config.pool_ema.checked(now)?;
-    require!(within_bps(spot, ema, config.max_price_move_bps), E::PoolManipulated);
 
     let infos = ctx.accounts.to_account_infos();
     let bump = [config.authority_bump];

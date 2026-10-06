@@ -34,8 +34,7 @@ fn traded_ordered(index_first: Option<bool>) -> (Env, Kp) {
     let mut env = Env::launched_ordered(index_first);
     let whale = env.funded();
     env.buy(&whale, 50_000 * 1_000_000).unwrap();
-    // The pool average lags real moves on purpose (~5 min time constant): after a 2x pump it
-    // takes ~25 minutes to come within the 3% bound that lets a switch pull.
+    // Lets every average warm up (switches need fresh, warm averages).
     env.keep(1800);
     (env, whale)
 }
@@ -142,17 +141,32 @@ fn a_pull_on_its_own_is_refused() {
 }
 
 #[test]
-fn pull_refuses_a_manipulated_pool() {
+fn a_switch_goes_through_a_pumped_price_and_the_pump_does_not_pay() {
     let (mut env, whale) = traded();
-    let x = env.x;
+    let (x, usdc, mint) = (env.x, env.usdc, env.mint);
     env.request(&whale, x).unwrap();
-    // Someone pumps the pool hard right before the switch.
+    // Someone pumps the pool hard right before the switch (far past the 3% the old check allowed).
     let pumper = env.funded();
-    env.buy(&pumper, 200_000 * 1_000_000).unwrap();
+    let spent = 200_000 * 1_000_000;
+    let before = env.our_pool(&env.config().active_pool).sqrt_price;
+    env.buy(&pumper, spent).unwrap();
+    let pumped = env.our_pool(&env.config().active_pool).sqrt_price;
+    assert!((pumped as f64 / before as f64).powi(2) > 1.15, "pump too small to test");
     let cranker = env.funded();
     let ixs = env.switch_ixs(&cranker);
-    let err = env.send(&ixs, &[&cranker]).unwrap_err();
-    assert!(err.contains("PoolManipulated"), "{err}");
+    env.send(&ixs, &[&cranker]).unwrap();
+    assert_eq!(env.config().active_quote, x);
+
+    // ...then dumps everything into the new pool and swaps back to USDC.
+    let (p_index, p_x, p_usdc) =
+        (env.ensure_ata(&pumper.pubkey(), &mint), env.ensure_ata(&pumper.pubkey(), &x), env.ensure_ata(&pumper.pubkey(), &usdc));
+    env.sell(&pumper, env.balance(&p_index)).unwrap();
+    let pool = env.x_pool;
+    let x_is_a = env.pool(&pool).mint_a == x;
+    let usdc_before = env.balance(&p_usdc);
+    env.user_swap(&pumper, &pool, x_is_a, env.balance(&p_x)).unwrap();
+    let back = env.balance(&p_usdc) - usdc_before;
+    assert!(back < spent, "round trip through a switch made money: spent {spent}, got {back}");
 }
 
 #[test]

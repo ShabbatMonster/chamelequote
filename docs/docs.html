@@ -102,7 +102,7 @@
         <ul>
           <li>Another switch is already running, or the last one was less than 5 minutes ago.</li>
           <li>The token you picked is already the quote, or has been disabled.</li>
-          <li>The price moved sharply in the last half hour. The program waits for its averages to catch up (see <a href="#averages">section 5</a>).</li>
+          <li>The token you picked had a sharp price move in the last few minutes on the pool it swaps through. The program waits for its average to catch up (see <a href="#averages">section 5</a>). Trading in this coin's own price never holds a switch up.</li>
           <li>The averages have not been updated in the last 2 minutes, which means the keeper is down.</li>
           <li>Someone other than the program created the pool for that quote, or the coin would land below the floor that pool was created with.</li>
         </ul>
@@ -135,19 +135,19 @@
 
       <section id="averages">
         <h2>5. Price averages and safety checks</h2>
-        <p>A switch trades the whole backing at once, which would make it a target: push a price, trigger a switch, profit. To stop that, the program keeps its own slow-moving average of every price it trades on, and refuses to trade when the live price strays too far from it.</p>
+        <p>A switch trades the whole backing at once, which would make it a target: push a quote token's price, trigger a switch, profit. To stop that, the program keeps its own slow-moving average of the price of every quote token, and refuses to swap through a pool whose live price strays too far from it.</p>
+        <p>The coin's own price is free to move. Whatever it is when a switch lands carries straight over to the new pool (times the exchange rate the backing got), on the same curve, so pumping it before a switch and dumping it after only pays the 1% pool fee twice. Switches go through no matter how hard the coin is trading.</p>
         <table class="spec">
           <thead><tr><th scope="col">Setting</th><th scope="col">Value</th></tr></thead>
           <tbody>
             <tr><td>Average time constant</td><td>5 minutes</td></tr>
             <tr><td>Average counts as stale after</td><td>2 minutes without an update</td></tr>
             <tr><td>Warm-up after a restart</td><td>10 minutes of updates</td></tr>
-            <tr><td>Coin's pool may stray from its average</td><td>3% (at the pull)</td></tr>
             <tr><td>A route pool may stray from its average</td><td>2% (before each swap)</td></tr>
             <tr><td>A swap may return less than the average says</td><td>2%, after the pool's own fee</td></tr>
           </tbody>
         </table>
-        <p>The admin can tighten or loosen these within hard limits (0.5% to 5%). After every switch the coin's own average restarts from the price the program just set, so the next switch can go 5 minutes later (the site counts it down; requests before then are refused before anything is burned). After a genuine big move, such as a 2&times; pump, switching waits roughly 25 minutes for the average to catch up.</p>
+        <p>The admin can tighten or loosen these within hard limits (0.5% to 5%). After every switch the coin's own average restarts from the price the program just set, so the next switch can go 5 minutes later (the site counts it down; requests before then are refused before anything is burned). If a quote token's own market makes a genuine big move, switches into or out of it wait until its average catches up.</p>
       </section>
 
       <section id="quotes">
