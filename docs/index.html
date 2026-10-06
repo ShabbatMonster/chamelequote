@@ -33,10 +33,12 @@
         <a role="menuitem" id="link-scan" href="#" target="_blank" rel="noopener">Solscan</a>
       </div>
       <div class="menu" id="menu-help" role="menu" hidden>
-        <a role="menuitem" href="#faq-how">How Does It Work?</a>
-        <a role="menuitem" href="#faq-switch">How Do I Change the Quote?</a>
-        <a role="menuitem" href="#faq-rename">How Do I Rename It?</a>
-        <a role="menuitem" href="#faq-safe">Is It Safe?</a>
+        <a role="menuitem" href="docs.html">Documentation</a>
+        <div class="menu-sep" role="separator"></div>
+        <a role="menuitem" href="docs.html#switching">Changing the Quote</a>
+        <a role="menuitem" href="docs.html#renaming">Renaming</a>
+        <a role="menuitem" href="docs.html#fees">Fees</a>
+        <a role="menuitem" href="docs.html#risks">Is It Safe?</a>
       </div>
     </div>
     <div class="menubar-right">
@@ -89,14 +91,14 @@
     <section class="window" id="switch" aria-labelledby="switch-h">
       <div class="titlebar"><h2 id="switch-h">Change the Quote</h2><span class="titlebar-btns" aria-hidden="true"><i>_</i><i>&#9633;</i><i>&times;</i></span></div>
       <div class="window-body">
-        <p>Pick what this coin trades against. Every token in the pool gets re-paired with your choice, and the price carries over.</p>
+        <p>Pick what this coin trades against. You pay by burning this coin, not the quote token. Every token in the pool gets re-paired with your choice, and the price carries over.</p>
         <span class="field-label" id="quote-label">New quote token:</span>
         <div class="combo" id="quote-combo">
           <button type="button" class="combo-field" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="quote-label" aria-controls="quote-list"><span class="combo-value">Choose&hellip;</span><span class="combo-arrow" aria-hidden="true"></span></button>
           <ul class="combo-list" id="quote-list" role="listbox" aria-labelledby="quote-label" hidden></ul>
         </div>
         <table class="cost">
-          <tr><th scope="row">Cost</th><td><b id="switch-cost">1,000,000</b> burned forever</td></tr>
+          <tr><th scope="row">Cost</th><td><b id="switch-cost">1,000,000</b> <b class="coin-sym">$COIN</b> burned forever</td></tr>
           <tr><th scope="row">You hold</th><td id="switch-balance">connect a wallet to see</td></tr>
         </table>
         <button type="button" class="btn btn-big" id="switch-go">Burn &amp; Switch</button>
@@ -142,7 +144,7 @@
               <span><b id="rn-preview-name">Your Name Here</b><br><span id="rn-preview-symbol">$TICKER</span></span>
             </div>
           </fieldset>
-          <p class="cost-line">Cost: <b id="rename-cost">1,000,000</b> burned forever.</p>
+          <p class="cost-line">Cost: <b id="rename-cost">1,000,000</b> <b class="coin-sym">$COIN</b> burned forever.</p>
           <button type="submit" class="btn btn-big" id="rename-go">Burn &amp; Rename</button>
           <p class="msg" id="rename-msg" role="status"></p>
         </form>
@@ -166,20 +168,9 @@
 
   <hr class="groove">
 
-  <section id="faq" aria-labelledby="faq-h">
-    <h2 id="faq-h">Frequently Asked Questions</h2>
-    <dl class="faq">
-      <dt id="faq-how">How does it work?</dt>
-      <dd>All of the coin's liquidity sits in one Orca pool owned by an on-chain program. Nobody holds a key to it. The token it trades against, the <i>quote</i>, can be changed: stocks like TSLAX, cash like USDC, or SOL and other coins from the approved list.</dd>
-      <dt id="faq-switch">How do I change the quote?</dt>
-      <dd>Pick a token above and burn 1,000,000. The program pulls the liquidity, swaps the backing into your pick, and puts it back in a new pool at the same dollar price, minus swap fees (usually under 1%). It takes a few transactions, about a minute, and trading pauses until they are done. If a switch is not finished within 10 minutes, anyone can cancel it and your tokens come back.</dd>
-      <dt>Why can't I switch right now?</dt>
-      <dd>Only one switch runs at a time. After a big price move the program also waits until its average price catches up (up to about half an hour), so nobody can pump the price and switch at a bad rate.</dd>
-      <dt id="faq-rename">How do I rename it?</dt>
-      <dd>Type a name, ticker and picture and burn 1,000,000. The picture is stored on IPFS. Wallets and Solscan show the change within minutes; some sites like DexScreener cache names for longer.</dd>
-      <dt id="faq-safe">Is it safe?</dt>
-      <dd>The program has not been audited yet. Stock tokens are issued by a company that can freeze or move them, and that includes the coin's backing while it is held in one. Only burn what you are happy to burn.</dd>
-    </dl>
+  <section id="docs-link" aria-labelledby="docs-h">
+    <h2 id="docs-h">How It Works</h2>
+    <p>Burn 1,000,000 of this coin (not the quote token) to change what it trades against, or to give it a new name, ticker and picture. The <a href="docs.html">documentation</a> explains every step, the safety checks, the fees and the contract.</p>
   </section>
 
   <footer class="footer">

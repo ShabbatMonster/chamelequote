@@ -325,3 +325,40 @@ table.cost td { padding: 1px 0; font-variant-numeric: tabular-nums; }
   .marquee span { padding-left: 0; }
   .progress-fill { transition: none; }
 }
+
+/* ---------------------------------------------------------------- docs page */
+.btn-link { text-decoration: none; display: inline-block; }
+.btn-link, .btn-link:visited { color: var(--ink); }
+.docs-head { padding-block: 18px 0; }
+.docs-head h1 { font-size: clamp(28px, 5vw, 40px); }
+.docs-head p { margin: 6px 0 0; max-width: 62ch; }
+.docs { display: grid; grid-template-columns: 190px 1fr; gap: 20px; align-items: start; }
+.toc {
+  position: sticky; top: calc(env(safe-area-inset-top, 0px) + 34px);
+  background: var(--chrome); padding: 3px;
+  border: 1px solid; border-color: var(--chrome-hi) var(--chrome-dk) var(--chrome-dk) var(--chrome-hi);
+  box-shadow: inset -1px -1px 0 var(--chrome-lo), inset 1px 1px 0 #dfdfdf;
+  font: 12px var(--ui);
+}
+.toc-title { background: linear-gradient(90deg, var(--title-a), var(--title-b)); color: var(--select-ink); font-weight: bold; padding: 2px 6px; }
+.toc ol { margin: 3px 0 0; padding: 6px 8px 6px 26px; background: var(--paper); border: 1px solid var(--chrome-lo); }
+.toc li { padding-block: 1px; }
+.toc-foot { margin: 4px 2px 1px; font-size: 10px; color: #333; }
+.doc-body { min-width: 0; max-width: 62ch; }
+.doc-body section { scroll-margin-top: 40px; }
+.doc-body h2 { border-bottom: 1px solid var(--chrome-lo); padding-bottom: 2px; }
+.doc-body section:first-child h2 { margin-top: 0; }
+.doc-body h3 { font: bold 15px var(--serif); margin: 14px 0 4px; }
+.doc-body ul { padding-left: 22px; }
+.doc-body li { margin-bottom: 4px; }
+.formula { font: bold 13px var(--mono); background: var(--soft); border: 1px dashed var(--chrome-lo); padding: 8px 10px; }
+table.spec { border-collapse: separate; border-spacing: 2px; border: 2px outset var(--chrome); width: 100%; margin-block: 8px; font-size: 12px; }
+table.spec th, table.spec td { border: 1px inset var(--chrome); padding: 3px 7px; vertical-align: top; text-align: left; }
+table.spec thead th { background: var(--chrome); font: bold 12px var(--ui); }
+table.spec tbody th { font-weight: normal; background: var(--soft); white-space: nowrap; }
+table.spec td:first-child { white-space: nowrap; }
+@media (max-width: 640px) {
+  .docs { grid-template-columns: 1fr; }
+  .toc { position: static; }
+  table.spec td:first-child { white-space: normal; }
+}

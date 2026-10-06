@@ -71,6 +71,7 @@ function render() {
 
   $("switch-cost").textContent = num(v.burnAmount);
   $("rename-cost").textContent = num(v.burnAmount);
+  for (const el of document.querySelectorAll(".coin-sym")) el.textContent = "$" + v.coin.symbol;
   renderBalance();
 
   const opts = v.quotes

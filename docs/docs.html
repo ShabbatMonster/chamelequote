@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chamelequote Docs</title>
+<meta name="description" content="How the coin works: changing the quote, renaming, the price averages, fees, the keeper and the contract.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- PAGE:START -->
+<div class="page" id="top">
+
+  <nav class="menubar" aria-label="Site menu">
+    <div class="menubar-left">
+      <button type="button" class="menu-title" data-menu="menu-coin" aria-haspopup="true" aria-expanded="false"><u>C</u>oin</button>
+      <button type="button" class="menu-title" data-menu="menu-docs" aria-haspopup="true" aria-expanded="false"><u>D</u>ocs</button>
+      <div class="menu" id="menu-coin" role="menu" hidden>
+        <a role="menuitem" href="index.html">Home Page</a>
+        <div class="menu-sep" role="separator"></div>
+        <a role="menuitem" href="index.html#switch">Change the Quote&hellip;</a>
+        <a role="menuitem" href="index.html#rename">Rename the Coin&hellip;</a>
+        <a role="menuitem" href="index.html#happenings">Recent Happenings</a>
+      </div>
+      <div class="menu" id="menu-docs" role="menu" hidden>
+        <a role="menuitem" href="#overview">Overview</a>
+        <a role="menuitem" href="#switching">Changing the Quote</a>
+        <a role="menuitem" href="#renaming">Renaming</a>
+        <a role="menuitem" href="#averages">Price Averages</a>
+        <div class="menu-sep" role="separator"></div>
+        <a role="menuitem" href="#contract">Contract Reference</a>
+        <a role="menuitem" href="#risks">Risks</a>
+      </div>
+    </div>
+    <div class="menubar-right"><a class="btn btn-small btn-link" href="index.html">&laquo; Back to Home</a></div>
+  </nav>
+
+  <header class="docs-head">
+    <h1>The Documentation</h1>
+    <p>Everything about how this coin works, in plain words. Numbers on this page are the program's real settings.</p>
+  </header>
+
+  <hr class="groove">
+
+  <div class="docs">
+    <aside class="toc" aria-label="Contents">
+      <div class="toc-title">Contents</div>
+      <ol>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#switching">Changing the quote</a></li>
+        <li><a href="#carry">How the price carries over</a></li>
+        <li><a href="#renaming">Renaming the coin</a></li>
+        <li><a href="#averages">Price averages and safety checks</a></li>
+        <li><a href="#quotes">Approved quote tokens</a></li>
+        <li><a href="#fees">Fees</a></li>
+        <li><a href="#keeper">The keeper</a></li>
+        <li><a href="#contract">Contract reference</a></li>
+        <li><a href="#risks">Risks</a></li>
+        <li><a href="#glossary">Glossary</a></li>
+      </ol>
+      <p class="toc-foot">Last revised October 2026.</p>
+    </aside>
+
+    <article class="doc-body">
+
+      <section id="overview">
+        <h2>1. Overview</h2>
+        <p>Every token of this coin started out in one Orca pool owned by a Solana program. No person holds the keys to that pool, to the coin's supply or to its name. Two things can be changed by anyone who burns <b>1,000,000 of the coin itself</b> (not the quote token):</p>
+        <ul>
+          <li><b>The quote token:</b> what the coin trades against. It could be a tokenized stock like TSLAX, a dollar like USDC, SOL, or another coin on the approved list.</li>
+          <li><b>The name, ticker and picture.</b></li>
+        </ul>
+        <p>Each burn buys exactly one change. Burned tokens are gone for good, so the supply only goes down. You never need to hold the quote token: to switch the coin from TSLAX to NVDAX, you burn the coin, not TSLAX or NVDAX.</p>
+      </section>
+
+      <section id="switching">
+        <h2>2. Changing the quote</h2>
+        <p>Pick a token on the home page and press <i>Burn &amp; Switch</i>. Your wallet sends one transaction that moves 1,000,000 of the coin (not the quote token) into an escrow account. After that, the switch happens in steps that anyone can run (the keeper normally does it within seconds):</p>
+        <table class="spec">
+          <thead><tr><th scope="col">Step</th><th scope="col">What happens</th></tr></thead>
+          <tbody>
+            <tr><td>Request</td><td>Your 1,000,000 tokens go into escrow. Only one switch can run at a time.</td></tr>
+            <tr><td>Pull</td><td>All liquidity comes out of the current pool, along with the trading fees it earned. Trading pauses here.</td></tr>
+            <tr><td>Hop</td><td>The backing is swapped toward the new quote one Orca pool at a time, through USDC or SOL. This takes one to three swaps.</td></tr>
+            <tr><td>Reprice</td><td>The new pool is set to the carried-over price (see <a href="#carry">section 3</a>).</td></tr>
+            <tr><td>Add</td><td>Liquidity goes back in. Your escrowed tokens are burned. Trading resumes.</td></tr>
+          </tbody>
+        </table>
+        <p>The whole thing usually takes about a minute. If a switch is not finished within <b>10 minutes</b>, anyone can cancel it: your 1,000,000 tokens are sent back, and the liquidity goes back in against whichever token the backing is held in at that moment.</p>
+        <h3>When you can't switch</h3>
+        <ul>
+          <li>Another switch is already running.</li>
+          <li>The token you picked is already the quote, or has been disabled.</li>
+          <li>The price moved sharply in the last half hour. The program waits for its averages to catch up (see <a href="#averages">section 5</a>).</li>
+          <li>The averages have not been updated in the last 2 minutes, which means the keeper is down.</li>
+        </ul>
+        <p>In all of these cases the request is refused before anything is burned.</p>
+      </section>
+
+      <section id="carry">
+        <h2>3. How the price carries over</h2>
+        <p>When the backing is swapped from the old quote into the new one, the program measures the exchange rate it actually got, and multiplies the coin's price by it:</p>
+        <p class="formula">new price = old price &times; (new quote received &divide; old quote sent)</p>
+        <p>So if the coin was worth 0.000001 TSLAX and the backing turned 1 TSLAX into 412 USDC, the coin starts at 0.000412 USDC. Its dollar value is the same, minus the swap fees, which are usually under 1% per switch.</p>
+        <p>The <b>floor price</b> moves the same way. The floor is the lowest price on the curve: the price reached if every token were sold back into the pool. Between the floor and the current price the pool holds the backing. Above the current price it holds every unsold token.</p>
+        <p>If the backing is tiny (worth under $1), a realised rate would be noise, so the program uses the price averages to translate the price instead.</p>
+      </section>
+
+      <section id="renaming">
+        <h2>4. Renaming the coin</h2>
+        <p>Fill in a new name, ticker and (optionally) a picture and a blurb, then press <i>Burn &amp; Rename</i>. The picture and details are uploaded to IPFS from your browser, and one transaction burns 1,000,000 tokens and rewrites the coin's metadata in the same step. If either part fails, neither happens.</p>
+        <table class="spec">
+          <thead><tr><th scope="col">Field</th><th scope="col">Rule</th></tr></thead>
+          <tbody>
+            <tr><td>Name</td><td>1 to 32 bytes</td></tr>
+            <tr><td>Ticker</td><td>1 to 10 bytes</td></tr>
+            <tr><td>Details link</td><td>Up to 200 bytes, starting with <code>https://</code>, <code>ipfs://</code> or <code>ar://</code></td></tr>
+            <tr><td>All three</td><td>No control characters (newlines, tabs and the like)</td></tr>
+          </tbody>
+        </table>
+        <p>Nobody can veto or undo a rename. The program is the only account allowed to change the metadata, and the only way it does so is through a burn. Wallets and Solscan show the new name within minutes; sites like DexScreener and Birdeye cache names and may take longer.</p>
+      </section>
+
+      <section id="averages">
+        <h2>5. Price averages and safety checks</h2>
+        <p>A switch trades the whole backing at once, which would make it a target: push a price, trigger a switch, profit. To stop that, the program keeps its own slow-moving average of every price it trades on, and refuses to trade when the live price strays too far from it.</p>
+        <table class="spec">
+          <thead><tr><th scope="col">Setting</th><th scope="col">Value</th></tr></thead>
+          <tbody>
+            <tr><td>Average time constant</td><td>5 minutes</td></tr>
+            <tr><td>Average counts as stale after</td><td>2 minutes without an update</td></tr>
+            <tr><td>Warm-up after a restart</td><td>10 minutes of updates</td></tr>
+            <tr><td>Coin's pool may stray from its average</td><td>3% (at the pull)</td></tr>
+            <tr><td>A route pool may stray from its average</td><td>2% (before each swap)</td></tr>
+            <tr><td>A swap may return less than the average says</td><td>2%, after the pool's own fee</td></tr>
+          </tbody>
+        </table>
+        <p>The admin can tighten or loosen these within hard limits (0.5% to 5%). The averages restart whenever the coin lands in a new pool, so there is a natural 10-minute cooldown between switches. After a genuine big move, such as a 2&times; pump, switching waits roughly 25 minutes for the average to catch up.</p>
+      </section>
+
+      <section id="quotes">
+        <h2>6. Approved quote tokens</h2>
+        <p>Only tokens on the program's list can become the quote. The list comes from the stonkfun approved quotes: tokenized stocks, pre-IPO tokens, dollars, SOL, plus other coins with deep enough Orca pools to swap the backing without losing much.</p>
+        <p>Every token routes through a <i>hub</i>, either USDC or SOL, using one Orca pool that pairs it with its hub. That pool is also where its price average comes from.</p>
+        <div class="table-wrap">
+          <table class="spec" id="quote-table">
+            <thead><tr><th scope="col">Token</th><th scope="col">Name</th><th scope="col">Group</th><th scope="col">Price</th></tr></thead>
+            <tbody><tr><td colspan="4">Loading&hellip;</td></tr></tbody>
+          </table>
+        </div>
+        <p class="note" id="quote-note"></p>
+      </section>
+
+      <section id="fees">
+        <h2>7. Fees</h2>
+        <ul>
+          <li><b>Trading fee:</b> 1% per trade, paid into the coin's own pool (Orca's 1% fee tier).</li>
+          <li><b>Where it goes:</b> at each switch, the fees are collected. A share set at launch (<span id="fee-share">at most 50%</span>) goes to the project's fee wallet; the rest stays in the pool as extra backing.</li>
+          <li><b>Swap fees:</b> when the backing is swapped during a switch, the route pools charge their usual fees (typically 0.04% to 1% per hop).</li>
+          <li><b>Burns:</b> 1,000,000 of the coin per rename or switch. There is no other charge, besides normal Solana network fees.</li>
+        </ul>
+      </section>
+
+      <section id="keeper">
+        <h2>8. The keeper</h2>
+        <p>The keeper is a small program run by the project. It does two jobs:</p>
+        <ul>
+          <li>Updates the price averages about once a minute.</li>
+          <li>Runs the steps of every switch, and cancels switches that run past their 10-minute deadline.</li>
+        </ul>
+        <p>It holds no special power. Every step it sends could be sent by anyone, and the program checks each one. If the keeper goes down, switches can't start (the averages go stale) and any switch in progress can be cancelled by anyone after its deadline, refunding the burn. The keeper's source is in the <a href="https://github.com/ShabbatMonster/chamelequote" target="_blank" rel="noopener">GitHub repository</a>.</p>
+      </section>
+
+      <section id="contract">
+        <h2>9. Contract reference</h2>
+        <table class="spec">
+          <tbody>
+            <tr><th scope="row">Program</th><td><code>3ZYVePG4LhBWH9JvhGcExo1ysX6mWAwTGavBvyMgM3Ws</code></td></tr>
+            <tr><th scope="row">Coin mint</th><td><code id="ref-mint">not launched yet</code></td></tr>
+            <tr><th scope="row">Decimals</th><td>6</td></tr>
+            <tr><th scope="row">Mint authority</th><td>none (revoked at launch)</td></tr>
+            <tr><th scope="row">Freeze authority</th><td>none</td></tr>
+            <tr><th scope="row">Metadata update authority</th><td>the program's <code>authority</code> account</td></tr>
+            <tr><th scope="row">Pools</th><td>Orca Whirlpools, 1% fee tier (tick spacing 128)</td></tr>
+            <tr><th scope="row">Source</th><td><a href="https://github.com/ShabbatMonster/chamelequote" target="_blank" rel="noopener">github.com/ShabbatMonster/chamelequote</a></td></tr>
+          </tbody>
+        </table>
+        <h3>Instructions</h3>
+        <table class="spec">
+          <thead><tr><th scope="col">Instruction</th><th scope="col">Who</th><th scope="col">Does</th></tr></thead>
+          <tbody>
+            <tr><td><code>rename</code></td><td>anyone</td><td>Burns 1,000,000 of the coin and rewrites name, ticker and details link.</td></tr>
+            <tr><td><code>request_switch</code></td><td>anyone</td><td>Escrows 1,000,000 of the coin and starts a switch to an approved quote.</td></tr>
+            <tr><td><code>pull</code>, <code>hop</code>, <code>reprice</code>, <code>add</code></td><td>anyone</td><td>The steps of a switch (see section 2).</td></tr>
+            <tr><td><code>abort</code></td><td>anyone, after the deadline</td><td>Cancels a stalled switch and refunds the burn.</td></tr>
+            <tr><td><code>poke_quotes</code>, <code>poke_pool</code></td><td>anyone</td><td>Update the price averages.</td></tr>
+            <tr><td><code>list_quote</code>, <code>set_quote_enabled</code>, <code>set_quote_route</code></td><td>admin</td><td>Manage the approved list.</td></tr>
+            <tr><td><code>set_risk_bounds</code>, <code>set_fee_share</code></td><td>admin</td><td>Tune the safety checks (0.5% to 5%) and the fee share (at most 50%).</td></tr>
+            <tr><td><code>set_admin</code></td><td>admin</td><td>Hands over or renounces the admin role. Renouncing freezes the list for good.</td></tr>
+          </tbody>
+        </table>
+        <p>The admin can't move funds, change the metadata, mint tokens or touch liquidity.</p>
+      </section>
+
+      <section id="risks">
+        <h2>10. Risks</h2>
+        <ul>
+          <li><b>Not audited.</b> The program has been tested against the real Orca and Metaplex programs, but no outside firm has reviewed it.</li>
+          <li><b>Stock tokens:</b> tokenized stocks are issued by a company that can pause, freeze or move them. That includes the coin's backing while it sits in one.</li>
+          <li><b>Thin quotes:</b> a quote with a shallow pool can make a switch fail its slippage check, or cost the backing a few percent.</li>
+          <li><b>The admin list:</b> whoever holds the admin role decides which tokens can be quotes, until the role is renounced.</li>
+          <li><b>Renames are open to everyone:</b> anyone with 1,000,000 tokens can rename the coin to anything that fits the rules, including names you won't like.</li>
+        </ul>
+        <p>Only burn what you are happy to burn.</p>
+      </section>
+
+      <section id="glossary">
+        <h2>11. Glossary</h2>
+        <dl class="faq">
+          <dt>Quote</dt><dd>The token the coin is priced in and paired with in its pool.</dd>
+          <dt>Backing</dt><dd>The quote tokens sitting in the pool: what sellers are paid from.</dd>
+          <dt>Floor price</dt><dd>The price the coin would reach if every token were sold back. The backing covers everything above it.</dd>
+          <dt>Hub</dt><dd>USDC or SOL. Every approved quote routes through one of them.</dd>
+          <dt>Route pool</dt><dd>The Orca pool pairing a quote with its hub. Swaps and price averages use it.</dd>
+          <dt>Escrow</dt><dd>Where a switch request's burn waits until the switch lands (burned) or is cancelled (refunded).</dd>
+          <dt>Keeper</dt><dd>The helper program that runs switch steps and updates price averages.</dd>
+        </dl>
+      </section>
+
+    </article>
+  </div>
+
+  <footer class="footer">
+    <p class="small"><a href="#top">Back to top</a> &middot; <a href="index.html">Home page</a></p>
+  </footer>
+
+</div>
+<!-- PAGE:END -->
+<script type="module" src="js/docs.js"></script>
+</body>
+</html>
