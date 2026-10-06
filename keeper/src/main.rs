@@ -57,7 +57,7 @@ use solana_transaction::Transaction;
 
 const COMPUTE_BUDGET: Pubkey = anchor_lang::prelude::pubkey!("ComputeBudget111111111111111111111111111111");
 const CLOCK_SYSVAR: Pubkey = anchor_lang::prelude::pubkey!("SysvarC1ock11111111111111111111111111111111");
-const POKE_EVERY: Duration = Duration::from_secs(50);
+const POKE_EVERY: Duration = Duration::from_secs(40);
 const RELIST_EVERY: Duration = Duration::from_secs(600);
 const TICK: Duration = Duration::from_secs(1);
 // One fast attempt per request, then step by step (the deadline is 10 minutes).
@@ -246,8 +246,11 @@ fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
             (crank.poke_quotes(&entries).remove(0), chunk.to_vec())
         })
         .collect();
+    // The coin's own pool first: quote batches that need retries can stretch a round past the
+    // two minutes after which the program restarts an average (and waits out a 10-minute
+    // warm-up before it lets a switch pull).
     if let Some(p) = crank.poke_pool() {
-        actions.push((p, vec![]));
+        actions.insert(0, (p, vec![]));
     }
     let (mut ok, mut failed) = (0, 0);
     for (a, chunk) in &actions {
