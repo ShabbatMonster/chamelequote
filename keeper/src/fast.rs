@@ -1,8 +1,10 @@
-//! Fast switches. A one-hop switch (pull, swap, reprice, add) goes in ONE transaction, so it is
-//! atomic: the coin is never without liquidity. Longer routes go as two transactions sent back to
-//! back: pull + every hop, then (as soon as that lands) reprice + add, so the pool is empty for
-//! about a second. Both are simulated before sending. Transactions are v0 and use address lookup
-//! tables kept by this keeper (~/.config/chamelequote/alts.json) to stay under 1232 bytes.
+//! Fast switches. Every step of a switch (pull, hops, then create/seed/reprice and add on the
+//! target pool) is built up front from an estimate of where the switch lands, packed into as few
+//! transactions as the 64-account and 64-entry trace limits allow, and sent back to back, each
+//! one as soon as the previous one is processed. A one-hop switch back into a pool the coin has
+//! used before fits in ONE transaction, so it is atomic; other switches take two, so the coin is
+//! without liquidity for about a second. Transactions are v0 and use address lookup tables kept
+//! by this keeper (~/.config/chamelequote/alts.json) to stay under 1232 bytes.
 //!
 //! (Jito bundles were tried first and kept coming back "Invalid" with no reason given; one
 //! transaction is atomic by definition and needs no third party.)
@@ -13,7 +15,7 @@ use anchor_lang::{
     prelude::Pubkey,
     solana_program::instruction::{AccountMeta, Instruction},
 };
-use chamelequote_crank::{Crank, Ledger};
+use chamelequote_crank::{pack, unique_accounts, Crank, MAX_TX_ACCOUNTS};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_message::{v0, AddressLookupTableAccount, VersionedMessage};
@@ -28,8 +30,7 @@ const SYSTEM: Pubkey = anchor_lang::prelude::pubkey!("11111111111111111111111111
 const COMPUTE_BUDGET: Pubkey = anchor_lang::prelude::pubkey!("ComputeBudget111111111111111111111111111111");
 const ALT_META_SIZE: usize = 56;
 const ALT_MAX: usize = 256;
-const MAX_TX_BYTES: usize = 1232;
-const MAX_ACCOUNTS: usize = 64;
+pub const MAX_TX_BYTES: usize = 1232;
 /// Priority fee for switch transactions (micro-lamports per CU): ~0.0003 SOL at 1.4M CU, so they
 /// land in the next block or two.
 const SWITCH_PRIORITY: u64 = 200_000;
@@ -40,7 +41,7 @@ fn alts_file() -> PathBuf {
 }
 
 fn load_alt(rpc: &Rpc, key: &Pubkey) -> Option<AddressLookupTableAccount> {
-    let (_, d) = rpc.account(key)?;
+    let (_, d) = chamelequote_crank::Ledger::account(rpc, key)?;
     let addresses = d.get(ALT_META_SIZE..)?.chunks_exact(32).map(|c| Pubkey::try_from(c).unwrap()).collect();
     Some(AddressLookupTableAccount { key: *key, addresses })
 }
@@ -93,9 +94,11 @@ fn extend_alt_ix(authority: &Pubkey, table: &Pubkey, keys: &[Pubkey]) -> Instruc
 
 /// Makes sure every address in `needed` is in one of our lookup tables, creating or extending
 /// tables as needed, and waits until new entries are usable (a slot later).
-fn ensure_alts(rpc: &Rpc, payer: &Keypair, needed: &[Pubkey], fee: u64) -> Result<Vec<AddressLookupTableAccount>, String> {
+pub fn ensure_alts(rpc: &Rpc, payer: &Keypair, needed: &[Pubkey], fee: u64) -> Result<Vec<AddressLookupTableAccount>, String> {
     let mut alts = load_alts(rpc);
-    let mut missing: Vec<Pubkey> = needed.iter().filter(|k| !alts.iter().any(|a| a.addresses.contains(k))).copied().collect();
+    let me = payer.pubkey();
+    let mut missing: Vec<Pubkey> =
+        needed.iter().filter(|k| **k != me && !alts.iter().any(|a| a.addresses.contains(k))).copied().collect();
     missing.sort();
     missing.dedup();
     if missing.is_empty() {
@@ -107,7 +110,7 @@ fn ensure_alts(rpc: &Rpc, payer: &Keypair, needed: &[Pubkey], fee: u64) -> Resul
             Some(i) => i,
             None => {
                 let slot = rpc.0.get_slot().map_err(|e| e.to_string())?.saturating_sub(1);
-                let (key, ix) = create_alt_ix(&payer.pubkey(), slot);
+                let (key, ix) = create_alt_ix(&me, slot);
                 send(rpc, payer, &chamelequote_crank::Action { label: "create lookup table", ixs: vec![ix], signers: vec![] }, fee)?;
                 log(&format!("created lookup table {key}"));
                 alts.push(AddressLookupTableAccount { key, addresses: vec![] });
@@ -117,7 +120,7 @@ fn ensure_alts(rpc: &Rpc, payer: &Keypair, needed: &[Pubkey], fee: u64) -> Resul
         };
         let room = ALT_MAX - alts[idx].addresses.len();
         let chunk: Vec<Pubkey> = missing.drain(..missing.len().min(room).min(20)).collect();
-        let ix = extend_alt_ix(&payer.pubkey(), &alts[idx].key, &chunk);
+        let ix = extend_alt_ix(&me, &alts[idx].key, &chunk);
         send(rpc, payer, &chamelequote_crank::Action { label: "extend lookup table", ixs: vec![ix], signers: vec![] }, fee)?;
         alts[idx].addresses.extend(chunk);
         last_slot = rpc.0.get_slot().map_err(|e| e.to_string())?;
@@ -131,33 +134,39 @@ fn ensure_alts(rpc: &Rpc, payer: &Keypair, needed: &[Pubkey], fee: u64) -> Resul
     Ok(alts)
 }
 
-fn budget(units: u32) -> [Instruction; 2] {
-    [
-        Instruction { program_id: COMPUTE_BUDGET, accounts: vec![], data: [vec![2u8], units.to_le_bytes().to_vec()].concat() },
-        Instruction { program_id: COMPUTE_BUDGET, accounts: vec![], data: [vec![3u8], SWITCH_PRIORITY.to_le_bytes().to_vec()].concat() },
-    ]
-}
-
-fn unique_accounts(ixs: &[Instruction], payer: &Pubkey) -> usize {
-    let mut keys: Vec<Pubkey> = ixs.iter().flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey).chain([ix.program_id])).collect();
-    keys.push(*payer);
-    keys.push(COMPUTE_BUDGET);
-    keys.sort();
-    keys.dedup();
-    keys.len()
-}
-
-/// Builds, checks limits, simulates and sends one v0 transaction; waits for confirmation.
-fn send_v0(rpc: &Rpc, payer: &Keypair, label: &str, ixs: &[Instruction], alts: &[AddressLookupTableAccount]) -> Result<String, String> {
-    let n = unique_accounts(ixs, &payer.pubkey());
-    if n > MAX_ACCOUNTS {
-        return Err(format!("{label}: {n} accounts, over the {MAX_ACCOUNTS} limit"));
+fn budget(units: u32, price: u64) -> Vec<Instruction> {
+    let mut out = vec![Instruction { program_id: COMPUTE_BUDGET, accounts: vec![], data: [vec![2u8], units.to_le_bytes().to_vec()].concat() }];
+    if price > 0 {
+        out.push(Instruction { program_id: COMPUTE_BUDGET, accounts: vec![], data: [vec![3u8], price.to_le_bytes().to_vec()].concat() });
     }
-    let mut all = budget(1_400_000).to_vec();
+    out
+}
+
+/// Builds, checks limits, simulates and sends one v0 transaction (`signers` after the payer),
+/// then waits until it reaches `commitment`.
+#[allow(clippy::too_many_arguments)]
+pub fn send_v0(
+    rpc: &Rpc,
+    payer: &Keypair,
+    signers: &[&Keypair],
+    label: &str,
+    ixs: &[Instruction],
+    alts: &[AddressLookupTableAccount],
+    units: u32,
+    price: u64,
+    commitment: CommitmentConfig,
+) -> Result<String, String> {
+    let n = unique_accounts(ixs, &payer.pubkey());
+    if n > MAX_TX_ACCOUNTS {
+        return Err(format!("{label}: {n} accounts, over the {MAX_TX_ACCOUNTS} limit"));
+    }
+    let mut all = budget(units, price);
     all.extend(ixs.iter().cloned());
     let blockhash = rpc.0.get_latest_blockhash().map_err(|e| e.to_string())?;
     let msg = v0::Message::try_compile(&payer.pubkey(), &all, alts, blockhash).map_err(|e| e.to_string())?;
-    let tx = VersionedTransaction::try_new(VersionedMessage::V0(msg), &[payer]).map_err(|e| e.to_string())?;
+    let mut keys: Vec<&Keypair> = vec![payer];
+    keys.extend(signers.iter().copied());
+    let tx = VersionedTransaction::try_new(VersionedMessage::V0(msg), &keys).map_err(|e| e.to_string())?;
     let size = bincode::serialize(&tx).map_err(|e| e.to_string())?.len();
     if size > MAX_TX_BYTES {
         return Err(format!("{label}: {size} bytes, over the {MAX_TX_BYTES} limit"));
@@ -175,7 +184,7 @@ fn send_v0(rpc: &Rpc, payer: &Keypair, label: &str, ixs: &[Instruction], alts: &
         let why: Vec<&String> = logs.iter().filter(|l| l.contains("Error") || l.contains("failed")).collect();
         return Err(format!("{label} would fail: {err:?} {why:?}"));
     }
-    // Rebroadcast every 2 s until confirmed (or 30 s): a dropped send costs seconds, not the
+    // Rebroadcast every 2 s until it lands (or 30 s): a dropped send costs seconds, not the
     // minute the RPC client's own confirm loop waits.
     let sig = tx.signatures[0];
     let started = std::time::Instant::now();
@@ -184,14 +193,14 @@ fn send_v0(rpc: &Rpc, payer: &Keypair, label: &str, ixs: &[Instruction], alts: &
             &tx,
             RpcSendTransactionConfig { skip_preflight: true, max_retries: Some(0), ..Default::default() },
         );
-        for _ in 0..4 {
-            sleep(Duration::from_millis(500));
+        for _ in 0..10 {
+            sleep(Duration::from_millis(200));
             if let Ok(st) = rpc.0.get_signature_statuses(&[sig]) {
                 if let Some(Some(s)) = st.value.first() {
                     if let Some(err) = &s.err {
                         return Err(format!("{label} failed on-chain: {err:?}"));
                     }
-                    if s.satisfies_commitment(CommitmentConfig::confirmed()) {
+                    if s.satisfies_commitment(commitment) {
                         break 'outer;
                     }
                 }
@@ -207,63 +216,40 @@ fn send_v0(rpc: &Rpc, payer: &Keypair, label: &str, ixs: &[Instruction], alts: &
 
 /// One fast attempt at the request in flight. Ok(true) when the switch completed.
 pub fn try_fast(rpc: &Rpc, payer: &Keypair, fee: u64) -> Result<bool, String> {
-    let crank = Crank::new(rpc, payer.pubkey());
+    let me = payer.pubkey();
+    let crank = Crank::new(rpc, me);
     let Some(est) = crank.estimate() else { return Ok(false) };
 
-    for a in crank.bundle_prep(&est) {
+    for a in crank.fast_prep(&est) {
         if a.ixs.is_empty() {
             continue;
         }
         send(rpc, payer, &a, fee).map_err(|e| format!("{}: {}", a.label, first_line(&e)))?;
     }
 
-    let crank = Crank::new(rpc, payer.pubkey());
-    let compact = crank.switch_steps(&est, true);
-    let full = crank.switch_steps(&est, false);
-    let me = payer.pubkey();
-    let mut needed: Vec<Pubkey> =
-        compact.iter().chain(full.iter()).flatten().flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey)).filter(|k| *k != me).collect();
-    // The second transaction (reprice + add) is built only after the first lands, at the exact
-    // target. Put every tick array it could touch in the lookup tables now, so nothing has to be
-    // added (and waited on) while the pool is empty.
-    let ts = crank.config().tick_spacing as i32;
-    let span = ts * chamelequote::math::TICK_ARRAY_SIZE;
-    let start = chamelequote::math::tick_array_start(chamelequote::math::tick_at_sqrt_price(est.pool_sqrt), ts);
-    for k in -2..=2 {
-        needed.push(chamelequote::whirlpool::tick_array_address(&est.target_pool, start + k * span));
-    }
-    for p in est.positions {
-        for t in [p.0, p.1] {
-            for k in -1..=1 {
-                needed.push(chamelequote::whirlpool::tick_array_address(&est.target_pool, chamelequote::math::tick_array_start(t, ts) + k * span));
-            }
-        }
-    }
+    // Built after the prep so they see fresh state; every account goes in the lookup tables
+    // before the pull, so nothing has to be added (and waited on) while the pool is empty.
+    let crank = Crank::new(rpc, me);
+    let compact = pack(crank.fast_steps(&est, true), &me);
+    let full = pack(crank.fast_steps(&est, false), &me);
+    let needed: Vec<Pubkey> =
+        compact.iter().chain(full.iter()).flat_map(|t| t.1.iter()).flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey)).collect();
     let alts = ensure_alts(rpc, payer, &needed, fee)?;
 
-    // Try compact tick arrays first (fewer accounts); the full set if a swap leaves its array.
-    let attempt = |steps: &Vec<Vec<Instruction>>, label: &str| -> Result<(), String> {
-        if est.hops.len() <= 1 {
-            let one: Vec<Instruction> = steps.iter().flatten().cloned().collect();
-            send_v0(rpc, payer, label, &one, &alts).map(|_| ())
-        } else {
-            let first: Vec<Instruction> = steps[..steps.len() - 1].iter().flatten().cloned().collect();
-            send_v0(rpc, payer, label, &first, &alts).map(|_| ())
-        }
-    };
-    let label = if est.hops.len() <= 1 { "switch (one transaction)" } else { "pull + hops" };
-    if let Err(e1) = attempt(&compact, label) {
-        log(&format!("compact attempt: {}", first_line(&e1)));
-        attempt(&full, label)?;
+    // Only the last transaction needs to be confirmed; each one before it is simulated against
+    // the processed state, so the next can follow right away.
+    let commitment = |plan: &Vec<_>, i: usize| if i + 1 == plan.len() { CommitmentConfig::confirmed() } else { CommitmentConfig::processed() };
+    let mut plan = &compact;
+    let (labels, ixs) = &plan[0];
+    if let Err(e) = send_v0(rpc, payer, &[], &labels.join(" + "), ixs, &alts, 1_400_000, SWITCH_PRIORITY, commitment(plan, 0)) {
+        // Most likely a hop leaving its one tick array: go again with the full sets.
+        log(&format!("compact attempt: {}", first_line(&e)));
+        plan = &full;
+        let (labels, ixs) = &plan[0];
+        send_v0(rpc, payer, &[], &labels.join(" + "), ixs, &alts, 1_400_000, SWITCH_PRIORITY, commitment(plan, 0))?;
     }
-    if est.hops.len() <= 1 {
-        return Ok(true);
+    for (i, (labels, ixs)) in plan.iter().enumerate().skip(1) {
+        send_v0(rpc, payer, &[], &labels.join(" + "), ixs, &alts, 1_400_000, SWITCH_PRIORITY, commitment(plan, i))?;
     }
-
-    // Second transaction: reprice + add at the exact target, as soon as the first is confirmed.
-    let finish = Crank::new(rpc, me).finish_ixs().ok_or("not in the repricing phase after the hops")?;
-    let finish_keys: Vec<Pubkey> = finish.iter().flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey)).filter(|k| *k != me).collect();
-    let alts = ensure_alts(rpc, payer, &finish_keys, fee)?;
-    send_v0(rpc, payer, "reprice + add", &finish, &alts)?;
     Ok(true)
 }

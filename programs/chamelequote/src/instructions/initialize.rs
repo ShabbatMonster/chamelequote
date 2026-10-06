@@ -15,8 +15,8 @@ pub struct InitializeParams {
     pub supply: u64,
     /// Raw units burned per rename or quote change.
     pub burn_amount: u64,
-    /// Orca WhirlpoolsConfig our pools live under, and the fee tier (tick spacing) they use.
-    pub whirlpools_config: Pubkey,
+    /// Raydium CLMM AmmConfig (fee tier) our pools are created under, and its tick spacing.
+    pub clmm_config: Pubkey,
     pub tick_spacing: u16,
     pub usdc: Pubkey,
     pub wsol: Pubkey,
@@ -137,7 +137,7 @@ pub fn initialize_handler(ctx: Context<Initialize>, params: InitializeParams) ->
         bump: ctx.bumps.config,
         authority_bump,
         escrow_bump: ctx.bumps.escrow,
-        whirlpools_config: params.whirlpools_config,
+        clmm_config: params.clmm_config,
         tick_spacing: params.tick_spacing,
         usdc: params.usdc,
         wsol: params.wsol,

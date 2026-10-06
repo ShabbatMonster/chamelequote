@@ -1,5 +1,6 @@
-//! LiteSVM harness: our dev build, Metaplex and Orca Whirlpools (dumped from mainnet), Orca's
-//! mainnet WhirlpoolsConfig and fee tiers, and a small market:
+//! LiteSVM harness: our dev build, Metaplex, Orca Whirlpools and Raydium CLMM (dumped from
+//! mainnet), Orca's mainnet WhirlpoolsConfig and fee tiers, Raydium's 1% AmmConfig, and a small
+//! market (route pools on Orca; our own pools are Raydium):
 //!
 //!   USDC (6dp)  -- root hub
 //!   WSOL (9dp)  -- hub, routed via a SOL/USDC pool ($150)
@@ -21,6 +22,7 @@ use chamelequote::{
     instructions::InitializeParams,
     math,
     metaplex::{metadata_address, TOKEN_METADATA_ID},
+    raydium as ray,
     state::{Config, QuoteEntry, AUTHORITY_SEED, CONFIG_SEED, ESCROW_SEED, QUOTE_SEED},
     whirlpool::{self as wp, PoolState, Sides},
     ID as PROGRAM_ID,
@@ -40,10 +42,12 @@ pub use solana_signer::Signer as _;
 pub const DECIMALS: u32 = 6;
 pub const SUPPLY: u64 = 1_000_000_000 * 10u64.pow(DECIMALS);
 pub const BURN: u64 = 1_000_000 * 10u64.pow(DECIMALS);
-pub const TS_OURS: u16 = 128;
+pub const TS_OURS: u16 = 120;
 pub const TS_ROUTE: u16 = 64;
 pub const FEE_SHARE_BPS: u16 = 1000;
 pub const WP_CONFIG: Pubkey = anchor_lang::prelude::pubkey!("2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ");
+/// Raydium CLMM's 1% fee tier (tick spacing 120).
+pub const CLMM_CONFIG: Pubkey = anchor_lang::prelude::pubkey!("A1BBtTYJd4i3xU8D6Tc2FzU6ZN4oXZWXKZnCxwbHXr8x");
 const COMPUTE_BUDGET: Pubkey = anchor_lang::prelude::pubkey!("ComputeBudget111111111111111111111111111111");
 
 pub fn pda(seeds: &[&[u8]]) -> Pubkey {
@@ -96,6 +100,9 @@ pub struct Env {
     pub y_pool: Pubkey,
     /// Compute units of the last successful transaction (for budget checks).
     pub last_cu: u64,
+    /// Instruction-trace entries (top level + CPIs) of the last successful transaction, counted
+    /// as on mainnet (with both compute-budget instructions).
+    pub last_trace: usize,
     /// (step, compute units) of the last `crank`.
     pub crank_cu: Vec<(&'static str, u64)>,
 }
@@ -116,11 +123,13 @@ impl Env {
         let res = self
             .svm
             .send_transaction(tx)
-            .map(|m| m.compute_units_consumed)
+            .map(|m| (m.compute_units_consumed, m.inner_instructions.iter().map(|v| v.len()).sum::<usize>()))
             .map_err(|e| format!("{:?}\n{}", e.err, e.meta.logs.join("\n")));
         self.svm.expire_blockhash();
-        if let Ok(cu) = res {
+        if let Ok((cu, inner)) = res {
             self.last_cu = cu;
+            // Mainnet transactions carry a second compute-budget instruction (the priority fee).
+            self.last_trace = all.len() + 1 + inner;
         }
         res.map(|_| ())
     }
@@ -159,8 +168,14 @@ impl Env {
         QuoteEntry::try_deserialize(&mut &self.svm.get_account(&quote_pda(mint)).unwrap().data[..]).unwrap()
     }
 
+    /// An Orca pool (route pools).
     pub fn pool(&self, pool: &Pubkey) -> PoolState {
         wp::parse_pool(&self.svm.get_account(pool).unwrap().data).unwrap()
+    }
+
+    /// One of our Raydium pools.
+    pub fn our_pool(&self, pool: &Pubkey) -> ray::PoolState {
+        ray::parse_pool(&self.svm.get_account(pool).unwrap().data).unwrap()
     }
 
     pub fn create_mint(&mut self, decimals: u8) -> Pubkey {
@@ -300,19 +315,45 @@ impl Env {
         self.send(&[ix], &[user])
     }
 
+    /// A plain user trade through one of our Raydium pools, as far as `amount` goes (or to
+    /// `limit` if non-zero).
+    pub fn our_swap(&mut self, user: &Keypair, pool: &Pubkey, zero_for_one: bool, amount: u64, limit: u128) -> Result<(), String> {
+        let p = self.our_pool(pool);
+        self.ensure_ata(&user.pubkey(), &p.mint_0);
+        self.ensure_ata(&user.pubkey(), &p.mint_1);
+        let sides = ray::Sides {
+            mint: [p.mint_0, p.mint_1],
+            program: [spl_token::ID; 2],
+            ours: [ata(&user.pubkey(), &p.mint_0), ata(&user.pubkey(), &p.mint_1)],
+            vault: [p.vault_0, p.vault_1],
+        };
+        let ts = p.tick_spacing as i32;
+        let current = ray::tick_array_start(p.tick_current, ts);
+        let starts = ray::initialized_tick_arrays(&self.svm.get_account(pool).unwrap().data, ts);
+        let path: Vec<i32> = if zero_for_one {
+            starts.into_iter().rev().filter(|s| *s <= current).collect()
+        } else {
+            starts.into_iter().filter(|s| *s >= current).collect()
+        };
+        let arrays: Vec<Pubkey> = path.into_iter().take(10).map(|s| ray::tick_array_address(pool, s)).collect();
+        let ix = ray::swap_ix(user.pubkey(), p.amm_config, *pool, &sides, zero_for_one, amount, 0, limit, &arrays);
+        self.send(&[ix], &[user])
+    }
+
     /// Buys our token with `amount` of the active quote.
     pub fn buy(&mut self, user: &Keypair, amount: u64) -> Result<(), String> {
         let c = self.config();
         self.mint_to(&user.pubkey(), &c.active_quote, amount);
-        let a_to_b = !c.index_is_a(&c.active_quote); // pay quote: quote is A when index is B
-        self.user_swap(user, &c.active_pool, a_to_b, amount)
+        // Paying quote: token 1 when our token is token 0.
+        let zero_for_one = !c.index_is_a(&c.active_quote);
+        self.our_swap(user, &c.active_pool, zero_for_one, amount, 0)
     }
 
     /// Sells `amount` of our token into the active pool.
     pub fn sell(&mut self, user: &Keypair, amount: u64) -> Result<(), String> {
         let c = self.config();
-        let a_to_b = c.index_is_a(&c.active_quote);
-        self.user_swap(user, &c.active_pool, a_to_b, amount)
+        let zero_for_one = c.index_is_a(&c.active_quote);
+        self.our_swap(user, &c.active_pool, zero_for_one, amount, 0)
     }
 
     // -----------------------------------------------------------------------------------------
@@ -325,20 +366,28 @@ impl Env {
     /// `index_first`: Some(true) makes our mint sort before every quote mint (our token is
     /// token A in all its pools), Some(false) after (token B); None leaves it to chance.
     pub fn new_ordered(index_first: Option<bool>) -> Env {
+        Self::new_with("../target/deploy-dev/chamelequote.so", index_first, (CLMM_CONFIG, TS_OURS))
+    }
+
+    /// `program`: the build to load; `venue`: the pool config and tick spacing to initialize
+    /// with (Raydium's for this build; Orca's for the build before the move).
+    pub fn new_with(program: &str, index_first: Option<bool>, venue: (Pubkey, u16)) -> Env {
         let mut svm = LiteSVM::new();
-        svm.add_program_from_file(PROGRAM_ID, "../target/deploy-dev/chamelequote.so").unwrap();
+        svm.add_program_from_file(PROGRAM_ID, program).unwrap();
         svm.add_program_from_file(TOKEN_METADATA_ID, "fixtures/mpl_token_metadata.so").unwrap();
         svm.add_program_from_file(wp::WHIRLPOOL_ID, "fixtures/whirlpool.so").unwrap();
-        let fixtures: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string("fixtures/whirlpool_accounts.json").unwrap()).unwrap();
-        for (_, v) in fixtures.as_object().unwrap() {
-            let address: Pubkey = v["address"].as_str().unwrap().parse().unwrap();
-            let data = base64::engine::general_purpose::STANDARD.decode(v["data"].as_str().unwrap()).unwrap();
-            svm.set_account(
-                address,
-                Account { lamports: v["lamports"].as_u64().unwrap(), data, owner: wp::WHIRLPOOL_ID, executable: false, rent_epoch: 0 },
-            )
-            .unwrap();
+        svm.add_program_from_file(ray::CLMM_ID, "fixtures/raydium_clmm.so").unwrap();
+        for (file, owner) in [("fixtures/whirlpool_accounts.json", wp::WHIRLPOOL_ID), ("fixtures/raydium_accounts.json", ray::CLMM_ID)] {
+            let fixtures: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+            for (_, v) in fixtures.as_object().unwrap() {
+                let address: Pubkey = v["address"].as_str().unwrap().parse().unwrap();
+                let data = base64::engine::general_purpose::STANDARD.decode(v["data"].as_str().unwrap()).unwrap();
+                svm.set_account(
+                    address,
+                    Account { lamports: v["lamports"].as_u64().unwrap(), data, owner, executable: false, rent_epoch: 0 },
+                )
+                .unwrap();
+            }
         }
         let mut c = svm.get_sysvar::<Clock>();
         c.unix_timestamp = 1_790_000_000;
@@ -360,6 +409,7 @@ impl Env {
             x_pool: Pubkey::default(),
             y_pool: Pubkey::default(),
             last_cu: 0,
+            last_trace: 0,
             crank_cu: vec![],
         };
         let lp = env.lp.pubkey();
@@ -396,7 +446,7 @@ impl Env {
             env.add_lp(&pool, a, b);
         }
 
-        env.initialize(index_first);
+        env.initialize(index_first, venue);
         env.list_quote(usdc, None);
         env.list_quote(wsol, Some((usdc, env.hub_pool)));
         env.list_quote(x, Some((usdc, env.x_pool)));
@@ -404,7 +454,7 @@ impl Env {
         env
     }
 
-    fn initialize(&mut self, index_first: Option<bool>) {
+    fn initialize(&mut self, index_first: Option<bool>, venue: (Pubkey, u16)) {
         let quotes = [self.usdc, self.wsol, self.x, self.y];
         let mint = loop {
             let k = Keypair::new();
@@ -441,8 +491,8 @@ impl Env {
                     uri: "https://example.com/cham.json".into(),
                     supply: SUPPLY,
                     burn_amount: BURN,
-                    whirlpools_config: WP_CONFIG,
-                    tick_spacing: TS_OURS,
+                    clmm_config: venue.0,
+                    tick_spacing: venue.1,
                     usdc: self.usdc,
                     wsol: self.wsol,
                     fee_recipient: self.fee_recipient.pubkey(),
@@ -557,10 +607,10 @@ impl Env {
 
     pub fn pull_ix(&mut self, cranker: &Pubkey) -> Instruction {
         let c = self.config();
-        let p = self.pool(&c.active_pool);
         let fee = self.fee_recipient.pubkey();
-        self.ensure_ata(&fee, &p.mint_a);
-        self.ensure_ata(&fee, &p.mint_b);
+        for m in chamelequote::instructions::pool_mints(&c, &c.active_quote) {
+            self.ensure_ata(&fee, &m);
+        }
         self.crank_as(cranker).pull_ix()
     }
 
@@ -600,6 +650,7 @@ impl Env {
             signers.extend(action.signers.iter());
             self.send(&action.ixs, &signers).map_err(|e| format!("{}: {e}", action.label))?;
             self.crank_cu.push((action.label, self.last_cu));
+            eprintln!("  crank {}: {} CU, {} trace, {} accounts", action.label, self.last_cu, self.last_trace, chamelequote_crank::unique_accounts(&action.ixs, &cranker.pubkey()));
             if action.label == "hop" {
                 hops += 1;
             }
@@ -620,8 +671,8 @@ impl Env {
     /// Value of one raw index unit in raw USDC, from the live pools (spot).
     pub fn index_usd(&self) -> f64 {
         let c = self.config();
-        let p = self.pool(&c.active_pool);
-        let index_per = f(math::flip(p.sqrt_price, !c.index_is_a(&c.active_quote))); // quote per index
+        let sqrt = self.crank_as(&Pubkey::default()).our_sqrt(&c.active_pool).unwrap();
+        let index_per = f(math::flip(sqrt, !c.index_is_a(&c.active_quote))); // quote per index
         index_per * self.quote_usd(&c.active_quote)
     }
 

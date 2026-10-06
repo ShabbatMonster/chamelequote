@@ -143,12 +143,16 @@ function renderLinks() {
   const pool = view.pool;
   // The pool changes with every quote switch; these links always point at the live one.
   $("st-pool").textContent = pool ?? "—";
-  $("st-pool-pair").textContent = view.launched ? `Orca Whirlpool, ${view.coin.symbol} / ${view.active.symbol}` : "";
+  $("st-pool-pair").textContent = view.launched ? `${view.venue ?? "Raydium CLMM"}, ${view.coin.symbol} / ${view.active.symbol}` : "";
   const links = {
     axiom: pool && `https://axiom.trade/meme/${pool}`,
     fomo: `https://fomo.family/tokens/solana/${m}`,
     jup: `https://jup.ag/swap/${view.launched ? view.active.mint : "SOL"}-${m}`,
-    orca: pool && `https://www.orca.so/pools/${pool}`,
+    pool:
+      pool &&
+      (view.venue === "Orca Whirlpool"
+        ? `https://www.orca.so/pools/${pool}`
+        : `https://raydium.io/swap/?inputMint=${view.active.mint}&outputMint=${m}`),
     dex: `https://dexscreener.com/solana/${m}`,
     scan: `https://solscan.io/token/${m}`,
   };
@@ -507,6 +511,7 @@ function toView(s, happenings, image) {
     launched: s.launched,
     active: s.launched ? quoteView(s.active) : null,
     pool: s.config.activePool.toBase58(),
+    venue: s.venue,
     price: s.price,
     floor: s.floor,
     backing: s.backing,

@@ -1,6 +1,6 @@
-//! Fixed-point helpers. Prices are Whirlpool-style sqrt prices: Q64.64 `u128` values of
-//! sqrt(token_b / token_a) in raw units. Written from scratch (Orca's own math is not under an
-//! open licence); constants were generated with 120-digit decimal arithmetic.
+//! Fixed-point helpers. Prices are sqrt prices: Q64.64 `u128` values of sqrt(token_1 / token_0)
+//! (Orca: token_b / token_a) in raw units. Tick math follows Raydium CLMM (Apache-2.0) bit for
+//! bit, so prices we compute for our pool match the ones Raydium stores.
 
 #![allow(clippy::manual_div_ceil, clippy::assign_op_pattern)]
 
@@ -12,35 +12,34 @@ construct_uint! {
 
 pub const Q64: u128 = 1 << 64;
 
-/// Orca's bounds for sqrt prices, ticks and arrays.
+/// Raydium's bounds for sqrt prices and ticks.
 pub const MIN_SQRT_PRICE: u128 = 4295048016;
-pub const MAX_SQRT_PRICE: u128 = 79226673515401279992447579055;
+pub const MAX_SQRT_PRICE: u128 = 79226673521066979257578248091;
 pub const MIN_TICK: i32 = -443636;
 pub const MAX_TICK: i32 = 443636;
+/// Orca's tick array size (route pools).
 pub const TICK_ARRAY_SIZE: i32 = 88;
 
-/// floor(2^128 / sqrt(1.0001)^(2^i)), i = 0..19.
-const INV_SQRT_POW: [u128; 20] = [
-    340265354078544963557816517032075149313,
-    340248342086729790484326174814286782777,
-    340214320654664324051920982716015181259,
-    340146287995602323631171512101879684303,
-    340010263488231146823593991679159461443,
-    339738377640345403697157401104375502015,
-    339195258003219555707034227454543997024,
-    338111622100601834656805679988414885970,
-    335954724994790223023589805789778977699,
-    331682121138379247127172139078559817299,
-    323299236684853023288211250268160618738,
-    307163716377032989948697243942600083928,
-    277268403626896220162999269216087595045,
-    225923453940442621947126027127485391332,
-    149997214084966997727330242082538205942,
-    66119101136024775622716233608466517925,
-    12847376061809297530290974190478138312,
-    485053260817066172746253684029974020,
-    691415978906521570653435304214167,
-    1404880482679654955896180642,
+/// sqrt(1.0001)^-(2^i) in Q64, i = 1..18 (Raydium's tick_math constants).
+const RATIOS: [u128; 18] = [
+    0xfff97272373d4000,
+    0xfff2e50f5f657000,
+    0xffe5caca7e10f000,
+    0xffcb9843d60f7000,
+    0xff973b41fa98e800,
+    0xff2ea16466c9b000,
+    0xfe5dee046a9a3800,
+    0xfcbe86c7900bb000,
+    0xf987a7253ac65800,
+    0xf3392b0822bb6000,
+    0xe7159475a2caf000,
+    0xd097f3bdfd2f2000,
+    0xa9f746462d9f8000,
+    0x70d869a156f31c00,
+    0x31be135f97ed3200,
+    0x9aa508b5b85a500,
+    0x5d6af8dedc582c,
+    0x2216e584f5fa,
 ];
 
 pub fn mul_div(a: u128, b: u128, d: u128) -> Option<u128> {
@@ -63,28 +62,26 @@ pub fn mul_div_u256(a: U256, b: U256, d: U256) -> Option<u128> {
     (r <= U256::from(u128::MAX)).then(|| r.as_u128())
 }
 
-/// sqrt(1.0001^tick) in Q64.64, clamped to Orca's bounds.
+/// sqrt(1.0001^tick) in Q64.64, exactly as Raydium computes it (ticks clamped to the bounds).
 pub fn sqrt_price_at_tick(tick: i32) -> u128 {
+    let tick = tick.clamp(MIN_TICK, MAX_TICK);
     let t = tick.unsigned_abs();
-    // ratio = sqrt(1.0001)^-|t| in Q128
-    let mut ratio = U256::one() << 128;
-    for (i, c) in INV_SQRT_POW.iter().enumerate() {
-        if t & (1 << i) != 0 {
-            ratio = (ratio * U256::from(*c)) >> 128;
+    let mut ratio: u128 = if t & 1 != 0 { 0xfffcb933bd6fb800 } else { Q64 };
+    for (i, c) in RATIOS.iter().enumerate() {
+        if t & (2 << i) != 0 {
+            ratio = (ratio * c) >> 64;
         }
     }
-    let q64 = if tick >= 0 {
-        // invert: 2^192 / ratio(Q128) gives Q64
-        ((U256::one() << 192) / ratio).as_u128()
-    } else {
-        (ratio >> 64).as_u128()
-    };
-    q64.clamp(MIN_SQRT_PRICE, MAX_SQRT_PRICE)
+    if tick > 0 {
+        ratio = u128::MAX / ratio;
+    }
+    ratio
 }
 
 /// Greatest tick whose sqrt price is <= `sqrt_price`.
 pub fn tick_at_sqrt_price(sqrt_price: u128) -> i32 {
     let (mut lo, mut hi) = (MIN_TICK, MAX_TICK);
+    let sqrt_price = sqrt_price.clamp(MIN_SQRT_PRICE, MAX_SQRT_PRICE - 1);
     while lo < hi {
         let mid = lo + (hi - lo + 1) / 2;
         if sqrt_price_at_tick(mid) <= sqrt_price {
@@ -194,7 +191,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tick_bounds_match_orca() {
+    fn tick_bounds_match_raydium() {
         assert_eq!(sqrt_price_at_tick(MIN_TICK), MIN_SQRT_PRICE);
         assert_eq!(sqrt_price_at_tick(MAX_TICK), MAX_SQRT_PRICE);
         assert_eq!(sqrt_price_at_tick(0), Q64);

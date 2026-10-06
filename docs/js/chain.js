@@ -68,7 +68,7 @@ export function decodeConfig(data) {
   const c = {
     admin: r.key(), mint: r.key(), burnAmount: r.u64(), renames: r.u64(), quoteChanges: r.u64(), totalBurned: r.u64(),
     bump: r.u8(), authorityBump: r.u8(), escrowBump: r.u8(),
-    whirlpoolsConfig: r.key(), tickSpacing: r.u16(), usdc: r.key(), wsol: r.key(), feeRecipient: r.key(), feeShareBps: r.u16(),
+    clmmConfig: r.key(), tickSpacing: r.u16(), usdc: r.key(), wsol: r.key(), feeRecipient: r.key(), feeShareBps: r.u16(),
     maxPriceMoveBps: r.u16(), maxRouteDeviationBps: r.u16(), maxSlippageBps: r.u16(),
     activeQuote: r.key(), activePool: r.key(), floorSqrt: r.u128(), poolEma: r.ema(),
   };
@@ -88,16 +88,28 @@ export function decodeQuote(data) {
   };
 }
 
-export function decodePool(data) {
-  const r = new Reader(data);
-  r.o = 49;
+const ORCA_PROGRAM = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
+
+/** The coin's pool: Raydium CLMM, or the Orca Whirlpool it lived in before the move. Both store
+ *  sqrt(token B / token A) with the mints sorted, so A/B mean token 0/1 on Raydium. */
+export function decodePool(acc) {
+  const r = new Reader(acc.data);
+  if (acc.owner.toBase58() === ORCA_PROGRAM) {
+    r.o = 49;
+    const liquidity = r.u128();
+    const sqrtPrice = r.u128();
+    r.o = 101;
+    const mintA = r.key(), vaultA = r.key();
+    r.o = 181;
+    const mintB = r.key(), vaultB = r.key();
+    return { venue: "Orca Whirlpool", liquidity, sqrtPrice, mintA, vaultA, mintB, vaultB };
+  }
+  r.o = 73;
+  const mintA = r.key(), mintB = r.key(), vaultA = r.key(), vaultB = r.key();
+  r.o = 237;
   const liquidity = r.u128();
   const sqrtPrice = r.u128();
-  r.o = 101;
-  const mintA = r.key(), vaultA = r.key();
-  r.o = 181;
-  const mintB = r.key(), vaultB = r.key();
-  return { liquidity, sqrtPrice, mintA, vaultA, mintB, vaultB };
+  return { venue: "Raydium CLMM", liquidity, sqrtPrice, mintA, vaultA, mintB, vaultB };
 }
 
 /** Metaplex metadata: key(1) update_authority(32) mint(32) name symbol uri. */
@@ -154,7 +166,8 @@ export async function loadState(conn, wallet) {
   if (state.launched) {
     const active = byMint.get(config.activeQuote.toBase58());
     const [poolAcc] = await many(conn, [config.activePool]);
-    const pool = decodePool(poolAcc.data);
+    const pool = decodePool(poolAcc);
+    state.venue = pool.venue;
     const indexIsA = pool.mintA.equals(mint);
     const [va, vb] = await many(conn, [pool.vaultA, pool.vaultB]);
     const [indexVault, quoteVault] = indexIsA ? [va, vb] : [vb, va];

@@ -24,6 +24,22 @@ pub const MIN_REALISED_VALUE_USDC: u128 = 1_000_000;
 
 pub const MAX_FEE_SHARE_BPS: u16 = 10_000;
 
+/// Position slots in each of our pools: 0 and 1 hold the liquidity and move with every switch;
+/// the sentinel stays behind (see `seed`) so the pool can be repriced when we come back.
+pub const SENTINEL_SLOT: u8 = 2;
+/// The sentinel takes this fraction (1/n) of the backing, or all of a balance smaller than
+/// SENTINEL_MIN raw units (dust, where a thousandth would round to nothing).
+pub const SENTINEL_DIVISOR: u64 = 1000;
+pub const SENTINEL_MIN: u64 = 10_000;
+
+/// Raw units of a balance the sentinel takes.
+pub fn sentinel_share(balance: u64) -> u64 {
+    (balance / SENTINEL_DIVISOR).max(balance.min(SENTINEL_MIN))
+}
+/// How close to the target price a pool must be for liquidity to go in. `reprice` gets it
+/// exact when it can; this covers moves too small for the sentinel to carry.
+pub const PRICE_TOLERANCE_BPS: u16 = 25;
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
 #[cfg_attr(not(target_os = "solana"), derive(Debug))]
 pub struct Ema {
@@ -126,7 +142,9 @@ pub struct Config {
     pub escrow_bump: u8,
 
     // Pools
-    pub whirlpools_config: Pubkey,
+    /// Raydium CLMM AmmConfig (fee tier) our pools are created under, and its tick spacing.
+    /// (Held the Orca WhirlpoolsConfig before the move to Raydium; same layout.)
+    pub clmm_config: Pubkey,
     pub tick_spacing: u16,
     pub usdc: Pubkey,
     pub wsol: Pubkey,
@@ -158,7 +176,7 @@ impl Config {
         [AUTHORITY_SEED, std::slice::from_ref(&self.authority_bump)]
     }
 
-    /// `index_is_a` for a pool between our token and `quote` (Whirlpool sorts mints).
+    /// Whether our token is token 0 (Orca: token A) in a pool with `quote`; both venues sort mints.
     pub fn index_is_a(&self, quote: &Pubkey) -> bool {
         self.mint.to_bytes() < quote.to_bytes()
     }

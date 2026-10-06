@@ -1,8 +1,8 @@
 //! chamelequote keeper.
 //!
-//! Switches take the fast path (see bundle.rs): one atomic transaction for one-hop routes, two
-//! back-to-back transactions otherwise. If that fails the keeper falls back to sending the steps
-//! one by one.
+//! Switches take the fast path (see fast.rs): every step packed into as few transactions as fit
+//! (one, atomic, for a one-hop switch back into a pool used before; two back to back otherwise).
+//! If that fails the keeper falls back to sending the steps one by one.
 //!
 //! Every ~50 s it pokes the price averages of every listed quote and of the coin's own pool (a
 //! switch refuses to trade on an average older than two minutes). Every few seconds it checks
@@ -22,10 +22,12 @@
 //!                 [--out docs/quotes.json]   (the listed mints, for the website)
 //!   keeper launch --quote <mint> --price-num <n> --price-den <n>   (raw quote per raw token)
 //!   keeper request --quote <mint>   burn the keypair's coins to request a switch (testing)
+//!   keeper venue  [--clmm-config <pubkey>] [--tick-spacing <n>]   Raydium fee tier for new pools
+//!                 (default: the 1% tier); the live pool moves there at the next switch
 //!   keeper allow  --allowlist data/allowlist.json --routes data/orca-routes.json [--min-tvl 10000]
 //!                 [--out docs/quotes.json]   enable exactly the allowlist (listing what's missing)
 
-mod bundle;
+mod fast;
 
 use std::{
     collections::HashMap,
@@ -41,8 +43,8 @@ use anchor_lang::{
 use chamelequote::{state::QuoteEntry, ID as PROGRAM_ID};
 use chamelequote::{instructions::InitializeParams, math};
 use chamelequote_crank::{
-    config_pda, initialize_ix, launch_ix, list_quote_ix, quote_pda, request_switch_ix, set_quote_enabled_ix, Action, Crank, Ledger,
-    QUOTE_ENTRY_DISCRIMINATOR,
+    config_pda, initialize_ix, launch_ix, list_quote_ix, quote_pda, request_switch_ix, set_pool_venue_ix, set_quote_enabled_ix,
+    Action, Crank, Ledger, QUOTE_ENTRY_DISCRIMINATOR,
 };
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
@@ -60,16 +62,15 @@ const CLOCK_SYSVAR: Pubkey = anchor_lang::prelude::pubkey!("SysvarC1ock111111111
 const POKE_EVERY: Duration = Duration::from_secs(50);
 const RELIST_EVERY: Duration = Duration::from_secs(600);
 const TICK: Duration = Duration::from_secs(1);
-// The program stops refreshing the pool's average once a switch is requested, so the pull must
-// happen within ~2 minutes of the request: one fast attempt, then step by step.
+// One fast attempt per request, then step by step (the deadline is 10 minutes).
 const FAST_ATTEMPTS: u32 = 1;
 const CLAIM_EVERY: Duration = Duration::from_secs(900);
 
-// Mainnet defaults for `init`.
-const WHIRLPOOLS_CONFIG: &str = "2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ";
+// Mainnet defaults for `init` and `venue`: Raydium CLMM's 1% fee tier.
+const CLMM_CONFIG: &str = "A1BBtTYJd4i3xU8D6Tc2FzU6ZN4oXZWXKZnCxwbHXr8x";
 const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const WSOL: &str = "So11111111111111111111111111111111111111112";
-const TICK_SPACING: u16 = 128;
+const TICK_SPACING: u16 = 120;
 
 struct Rpc(RpcClient);
 
@@ -183,6 +184,23 @@ fn send(rpc: &Rpc, payer: &Keypair, action: &Action, priority_fee: u64) -> Resul
     let mut signers: Vec<&Keypair> = vec![payer];
     signers.extend(action.signers.iter());
     let tx = Transaction::new_signed_with_payer(&ixs, Some(&payer.pubkey()), &signers, blockhash);
+    if bincode::serialize(&tx).map(|b| b.len()).unwrap_or(usize::MAX) > fast::MAX_TX_BYTES {
+        // Too big for a legacy transaction (a Raydium step names ~30 accounts): v0 with lookup tables.
+        let keys: Vec<Pubkey> = action.ixs.iter().flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey)).collect();
+        let alts = fast::ensure_alts(rpc, payer, &keys, priority_fee)?;
+        let extra: Vec<&Keypair> = action.signers.iter().collect();
+        return fast::send_v0(
+            rpc,
+            payer,
+            &extra,
+            action.label,
+            &action.ixs,
+            &alts,
+            cu_limit(action.label),
+            priority_fee,
+            CommitmentConfig::confirmed(),
+        );
+    }
     // Simulate (so program errors come back with their logs), then rebroadcast every 2 s until
     // confirmed or 30 s pass: a dropped send costs seconds instead of a minute.
     let sim = rpc.0.simulate_transaction(&tx).map_err(|e| format!("{e:?}"))?.value;
@@ -263,8 +281,8 @@ fn poke_round(rpc: &Rpc, payer: &Keypair, quotes: &[QuoteEntry], fee: u64) {
 }
 
 /// Pushes an in-flight switch forward until idle or a step fails. Returns steps sent.
-/// A fresh request goes as one Jito bundle (a few attempts); anything else, or a request whose
-/// bundles keep missing, goes step by step.
+/// A fresh request takes the fast path once; anything else, or a request whose fast attempt
+/// failed, goes step by step.
 fn crank_round(rpc: &Rpc, payer: &Keypair, fee: u64, fast: bool, attempts: &mut HashMap<i64, u32>) -> usize {
     if fast {
         let state = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Crank::new(rpc, payer.pubkey()).config()));
@@ -273,7 +291,7 @@ fn crank_round(rpc: &Rpc, payer: &Keypair, fee: u64, fast: bool, attempts: &mut 
             let tries = attempts.entry(c.switch.deadline).or_insert(0);
             if fresh && *tries < FAST_ATTEMPTS {
                 *tries += 1;
-                match bundle::try_fast(rpc, payer, fee) {
+                match fast::try_fast(rpc, payer, fee) {
                     Ok(true) => {
                         log("switch done on the fast path");
                         return 1;
@@ -336,7 +354,9 @@ fn status(rpc: &Rpc) {
     let now = rpc.now();
     println!("mint          {}", c.mint);
     println!("active quote  {}", c.active_quote);
-    println!("active pool   {}", c.active_pool);
+    let venue = if crank.is_legacy(&c.active_pool) { "Orca (moves to Raydium at the next switch)" } else { "Raydium" };
+    println!("active pool   {} ({venue})", c.active_pool);
+    println!("new pools     Raydium config {} (tick spacing {})", c.clmm_config, c.tick_spacing);
     println!("switch phase  {:?} (target {}, holding {}, deadline in {}s)", c.switch.phase, c.switch.target, c.switch.holding, c.switch.deadline - now);
     println!("pool average  last poke {}s ago, warm: {}", now - c.pool_ema.last_ts, c.pool_ema.is_valid(now));
     for q in rpc.quote_entries() {
@@ -377,7 +397,7 @@ fn main() {
     let rpc = Rpc(RpcClient::new_with_commitment(o.rpc.clone(), CommitmentConfig::confirmed()));
     match cmd.as_str() {
         "status" => return status(&rpc),
-        "run" | "once" | "init" | "list" | "launch" | "allow" | "request" => {}
+        "run" | "once" | "init" | "list" | "launch" | "allow" | "request" | "venue" => {}
         _ => {
             println!("usage: keeper run|once|status|init|list|launch --rpc <url> --keypair <path> ... (see source header)");
             return;
@@ -401,6 +421,12 @@ fn main() {
             let c = Crank::new(&rpc, payer.pubkey()).config();
             let ix = request_switch_ix(&payer.pubkey(), &c, &o.pubkey("quote"));
             return send_ixs(&rpc, &payer, "request switch", vec![ix], vec![], o.priority_fee);
+        }
+        "venue" => {
+            let config: Pubkey = o.get_or("clmm-config", CLMM_CONFIG).parse().expect("--clmm-config must be a public key");
+            let ts: u16 = o.get_or("tick-spacing", &TICK_SPACING.to_string()).parse().expect("--tick-spacing takes a number");
+            let ix = set_pool_venue_ix(&payer.pubkey(), &config, ts);
+            return send_ixs(&rpc, &payer, "set pool venue", vec![ix], vec![], o.priority_fee);
         }
         _ => {}
     }
@@ -461,7 +487,7 @@ fn admin_init(rpc: &Rpc, payer: &Keypair, o: &Opts) {
         uri: o.get("uri"),
         supply: o.num("supply"),
         burn_amount: o.num("burn"),
-        whirlpools_config: o.get_or("whirlpools-config", WHIRLPOOLS_CONFIG).parse().unwrap(),
+        clmm_config: o.get_or("clmm-config", CLMM_CONFIG).parse().unwrap(),
         tick_spacing: o.get_or("tick-spacing", &TICK_SPACING.to_string()).parse().unwrap(),
         usdc: o.get_or("usdc", USDC).parse().unwrap(),
         wsol: o.get_or("wsol", WSOL).parse().unwrap(),

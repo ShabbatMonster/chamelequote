@@ -3,7 +3,7 @@
 
 use anchor_lang::prelude::*;
 
-use crate::{error::ChameleonError, math, state::*, whirlpool};
+use crate::{error::ChameleonError, math, raydium, state::*, whirlpool};
 
 /// sqrt(hub per quote) on the quote's route pool.
 pub fn route_spot(entry: &QuoteEntry, pool: &AccountInfo) -> Result<(u128, u16)> {
@@ -13,10 +13,14 @@ pub fn route_spot(entry: &QuoteEntry, pool: &AccountInfo) -> Result<(u128, u16)>
     Ok((math::flip(p.sqrt_price, p.mint_a != entry.mint), p.fee_rate))
 }
 
-/// sqrt(quote per index) on one of our pools.
+/// sqrt(quote per index) on one of our pools (Raydium, or the Orca pool from before the move).
 pub fn index_spot(config: &Config, pool: &AccountInfo, quote: &Pubkey) -> Result<u128> {
-    let p = whirlpool::read_pool(pool)?;
-    Ok(math::flip(p.sqrt_price, !config.index_is_a(quote)))
+    let sqrt_price = if *pool.owner == whirlpool::WHIRLPOOL_ID {
+        whirlpool::read_pool(pool)?.sqrt_price
+    } else {
+        raydium::read_pool(pool)?.sqrt_price
+    };
+    Ok(math::flip(sqrt_price, !config.index_is_a(quote)))
 }
 
 #[derive(Accounts)]
@@ -51,10 +55,11 @@ pub struct PokePool<'info> {
     pub pool: UncheckedAccount<'info>,
 }
 
-/// No-op while a switch is in flight (the pool is empty then).
+/// Keeps going after a switch is requested (the pull checks the price against this average), and
+/// is a no-op once the liquidity is out.
 pub fn poke_pool(ctx: Context<PokePool>) -> Result<()> {
     let config = &mut ctx.accounts.config;
-    if config.switch.phase != Phase::Idle || config.active_quote == Pubkey::default() {
+    if !matches!(config.switch.phase, Phase::Idle | Phase::Requested) || config.active_quote == Pubkey::default() {
         return Ok(());
     }
     let spot = index_spot(config, &ctx.accounts.pool, &config.active_quote.clone())?;

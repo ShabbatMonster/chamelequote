@@ -1,6 +1,6 @@
-//! Quote switching end to end against real Orca pools.
+//! Quote switching end to end against real Raydium (ours) and Orca (route) pools.
 
-use chamelequote::{math, state::Phase};
+use chamelequote::{math, raydium as ray, state::Phase};
 use chamelequote_tests::*;
 
 fn assert_close(a: f64, b: f64, tol: f64, what: &str) {
@@ -104,7 +104,8 @@ fn fee_share_goes_to_recipient() {
         let x = env.x;
         env.request(&whale, x).unwrap();
         env.crank().unwrap();
-        // $50k bought through a 1% pool: ~$500 of fees, 10% of it to the recipient.
+        // $50k bought through a 1% pool: ~$420 of fees after Raydium's 16% cut, 10% to the
+        // recipient (claimed right before the pull).
         let got = env.balance(&fee_ata) as f64 / 1e6;
         assert!((40.0..=60.0).contains(&got), "fee share: ${got}");
     }
@@ -248,25 +249,30 @@ fn abort_refunds_and_lands_where_the_backing_is() {
 
 #[test]
 fn reprice_moves_a_preexisting_pool_created_at_a_silly_price() {
-    let mut most_reprices = 0;
     for order in ORDERS {
         let (mut env, whale) = traded_ordered(order);
         let x = env.x;
         let usd0 = env.index_usd();
-        // Griefer pre-creates TOKEN/X at a silly price (1000 X per token), with no liquidity.
-        let mint = env.mint;
-        let silly = math::sqrt_ratio(1_000, 1).unwrap();
-        let griefed = env.init_pool(&mint, &x, TS_OURS, silly);
+        let c = env.config();
+        let griefed = chamelequote::instructions::expected_pool(&c, &x);
+        let mints = chamelequote::instructions::pool_mints(&c, &x);
+        // Griefer pre-creates TOKEN/X at a silly price (1000 raw X per raw token), no liquidity.
+        let silly = math::flip(math::sqrt_ratio(1_000, 1).unwrap(), !c.index_is_a(&x));
+        let griefer = env.funded();
+        let sides = ray::Sides {
+            mint: mints,
+            program: [anchor_spl::token::spl_token::ID; 2],
+            ours: [anchor_lang::prelude::Pubkey::default(); 2],
+            vault: mints.map(|m| ray::vault_address(&griefed, &m)),
+        };
+        env.send(&[ray::create_pool_ix(griefer.pubkey(), CLMM_CONFIG, griefed, &sides, silly)], &[&griefer]).unwrap();
         env.request(&whale, x).unwrap();
         env.crank().unwrap();
         assert_eq!(env.config().active_pool, griefed);
-        let reprices = env.crank_cu.iter().filter(|s| s.0 == "reprice").count();
-        most_reprices = most_reprices.max(reprices);
+        let labels: Vec<_> = env.crank_cu.iter().map(|s| s.0).collect();
+        assert!(labels.contains(&"seed") && labels.contains(&"reprice"), "{labels:?}");
         assert_close(env.index_usd(), usd0, 0.01, "repriced to fair");
     }
-    // Moving the price down through empty ticks stops at each three-array window, so at least one
-    // orientation must have needed several calls (Orca crosses empty space upward more freely).
-    assert!(most_reprices >= 3, "windowed reprice not exercised: {most_reprices}");
 }
 
 /// Prints value carried across each switch and compute used per crank step; fails if any step
@@ -336,159 +342,143 @@ fn claim_fees_pays_the_recipient_without_touching_liquidity() {
     let (mut env, _whale) = traded();
     let fee_ata = chamelequote::whirlpool::ata(&env.fee_recipient.pubkey(), &env.usdc, &anchor_spl::token::spl_token::ID);
     let pool = env.config().active_pool;
-    let (liq, price) = (env.pool(&pool).liquidity, env.pool(&pool).sqrt_price);
+    let (liq, price) = (env.our_pool(&pool).liquidity, env.our_pool(&pool).sqrt_price);
     let cranker = env.funded();
     let action = env.crank_as(&cranker.pubkey()).claim_fees().unwrap();
     env.send(&action.ixs, &[&cranker]).unwrap();
-    // $50k bought through a 1% pool: ~$500 of fees, 10% share in this test setup.
+    // $50k bought through a 1% pool: ~$420 of fees after Raydium's 16% cut, 10% share here.
     let got = env.balance(&fee_ata) as f64 / 1e6;
     assert!((40.0..=60.0).contains(&got), "fee share: ${got}");
-    assert_eq!((env.pool(&pool).liquidity, env.pool(&pool).sqrt_price), (liq, price), "liquidity untouched");
+    assert_eq!((env.our_pool(&pool).liquidity, env.our_pool(&pool).sqrt_price), (liq, price), "liquidity untouched");
     // Claiming again right away pays nothing new.
     let action = env.crank_as(&cranker.pubkey()).claim_fees().unwrap();
     env.send(&action.ixs, &[&cranker]).unwrap();
     assert_eq!(env.balance(&fee_ata) as f64 / 1e6, got);
 }
 
-/// The keeper's atomic path: prep, then pull + hops + (reprice + add) as one bundle. Here the
-/// bundle's transactions go in back to back; on mainnet Jito lands them in one block.
-fn bundled_switch(env: &mut Env, target: anchor_lang::prelude::Pubkey) -> usize {
+/// The keeper's fast path: prep (pokes, accounts, fee claim), then every step packed into as
+/// few transactions as the 64-account and 64-entry trace limits allow, sent back to back.
+/// Returns the number of transactions.
+fn fast_switch(env: &mut Env, target: anchor_lang::prelude::Pubkey) -> usize {
     let cranker = env.funded();
-    let est = env.crank_as(&cranker.pubkey()).estimate().expect("a requested switch to estimate");
-    let prep = env.crank_as(&cranker.pubkey()).bundle_prep(&est);
-    for a in prep {
-        let mut signers: Vec<&Kp> = vec![&cranker];
-        signers.extend(a.signers.iter());
-        env.send(&a.ixs, &signers).unwrap_or_else(|e| panic!("{}: {e}", a.label));
+    let est = env.crank_as(&cranker.pubkey()).estimate().unwrap();
+    for a in env.crank_as(&cranker.pubkey()).fast_prep(&est) {
+        let mut s: Vec<&Kp> = vec![&cranker];
+        s.extend(a.signers.iter());
+        env.send(&a.ixs, &s).unwrap_or_else(|e| panic!("{}: {e}", a.label));
     }
-    let txs = env.crank_as(&cranker.pubkey()).bundle_txs(&est);
-    assert!(txs.len() <= 5, "Jito bundles hold at most 5 transactions, planned {}", txs.len());
-    for (i, ixs) in txs.iter().enumerate() {
-        env.send(ixs, &[&cranker]).unwrap_or_else(|e| panic!("bundle tx {i}: {e}"));
+    let steps = env.crank_as(&cranker.pubkey()).fast_steps(&est, true);
+    let txs = chamelequote_crank::pack(steps, &cranker.pubkey());
+    for (i, (labels, ixs)) in txs.iter().enumerate() {
+        let k = chamelequote_crank::unique_accounts(ixs, &cranker.pubkey());
+        env.send(ixs, &[&cranker]).unwrap_or_else(|e| panic!("fast tx {i} {labels:?}: {e}"));
+        eprintln!("  tx {i} {labels:?}: {k} accounts, {} trace, {} CU", env.last_trace, env.last_cu);
+        assert!(k <= 64, "{k} accounts");
+        assert!(env.last_trace <= 64, "trace {}", env.last_trace);
+        assert!(env.last_cu < 1_400_000);
     }
     let c = env.config();
-    assert_eq!(c.switch.phase, Phase::Idle, "switch should be complete after the bundle");
+    assert_eq!(c.switch.phase, Phase::Idle);
     assert_eq!(c.active_quote, target);
     txs.len()
 }
 
 #[test]
-fn bundled_switch_completes_in_one_pass() {
+fn fast_switches_pack_into_few_transactions() {
     for order in ORDERS {
         let (mut env, whale) = traded_ordered(order);
-        let (x, y, usdc) = (env.x, env.y, env.usdc);
+        let (x, wsol, y, usdc) = (env.x, env.wsol, env.y, env.usdc);
         let usd0 = env.index_usd();
+        let plan = [
+            ("USDC->X (new pool)", x, 2),
+            ("X->SOL (new pool)", wsol, 2),
+            ("SOL->Y (new pool)", y, 2),
+            ("Y->X (revisit, 3 hops)", x, 2),
+            ("X->USDC (revisit, no sentinel yet)", usdc, 2),
+            ("USDC->X (revisit, 1 hop)", x, 1),
+        ];
+        for (name, target, txs) in plan {
+            env.request(&whale, target).unwrap();
+            eprintln!("{name}:");
+            assert_eq!(fast_switch(&mut env, target), txs, "{name}");
+            env.keep(660);
+        }
+        assert_close(env.index_usd(), usd0, 0.05, "after six fast switches");
+    }
+}
 
+#[test]
+fn revisits_reprice_through_the_sentinel() {
+    for order in ORDERS {
+        let (mut env, whale) = traded_ordered(order);
+        let (x, usdc) = (env.x, env.usdc);
+        // USDC -> X: a new pool, seeded with a sentinel.
         env.request(&whale, x).unwrap();
-        assert_eq!(bundled_switch(&mut env, x), 3, "pull, 1 hop, reprice+add");
-        assert_close(env.index_usd(), usd0, 0.01, "after bundled USDC -> X");
+        env.crank().unwrap();
+        let x_pool = env.config().active_pool;
         env.keep(660);
-
-        env.request(&whale, y).unwrap();
-        assert_eq!(bundled_switch(&mut env, y), 5, "pull, 3 hops, reprice+add");
-        assert_close(env.index_usd(), usd0, 0.02, "after bundled X -> Y");
-        env.keep(660);
-
-        // Back into an existing, emptied pool.
+        // X -> USDC: back to the launch pool, which had no sentinel (no backing at launch).
         env.request(&whale, usdc).unwrap();
-        bundled_switch(&mut env, usdc);
-        assert_close(env.index_usd(), usd0, 0.03, "after bundled round trip");
+        env.crank().unwrap();
+        let labels: Vec<_> = env.crank_cu.iter().map(|s| s.0).collect();
+        assert!(labels.contains(&"seed") && labels.contains(&"reprice"), "{labels:?}");
+        // The X pool keeps only its sentinel, so it stays tradeable.
+        assert!(env.our_pool(&x_pool).liquidity > 0, "sentinel left in the X pool");
+        // Move X so the way back lands at a different price, then go back.
+        let pusher = env.funded();
+        let pool = env.x_pool;
+        let usdc_is_a = env.pool(&pool).mint_a == usdc;
+        env.mint_to(&pusher.pubkey(), &usdc, 2_000_000 * 1_000_000);
+        env.user_swap(&pusher, &pool, usdc_is_a, 2_000_000 * 1_000_000).unwrap();
+        env.keep(1800);
+        let usd0 = env.index_usd();
+        env.request(&whale, x).unwrap();
+        env.crank().unwrap();
+        let labels: Vec<_> = env.crank_cu.iter().map(|s| s.0).collect();
+        assert!(labels.contains(&"reprice") && !labels.contains(&"seed"), "{labels:?}");
+        assert_eq!(env.config().active_pool, x_pool);
+        assert_close(env.index_usd(), usd0, 0.02, "back in the X pool at the new price");
+        env.buy(&whale, 1_000_000).unwrap();
     }
-}
-
-/// How many unique accounts a whole switch touches (mainnet allows 64 per transaction).
-#[test]
-fn report_switch_account_counts() {
-    let (mut env, whale) = traded_ordered(Some(true));
-    let (x, y, wsol) = (env.x, env.y, env.wsol);
-    let _ = y;
-    for (name, target) in [("USDC->X (1 hop)", x), ("X->SOL (2 hops)", wsol), ("SOL->Y (1 hop)", y), ("Y->X (3 hops)", x)] {
-        env.request(&whale, target).unwrap();
-        let cranker = env.funded();
-        let est = env.crank_as(&cranker.pubkey()).estimate().unwrap();
-        for a in env.crank_as(&cranker.pubkey()).bundle_prep(&est) {
-            let mut s: Vec<&Kp> = vec![&cranker];
-            s.extend(a.signers.iter());
-            env.send(&a.ixs, &s).unwrap();
-        }
-        let txs = env.crank_as(&cranker.pubkey()).bundle_txs(&est);
-        let mut keys: Vec<_> = txs.iter().flatten().flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey).chain([ix.program_id])).collect();
-        keys.push(cranker.pubkey());
-        keys.sort();
-        keys.dedup();
-        eprintln!("{name}: {} txs, {} unique accounts (incl. payer + programs)", txs.len(), keys.len());
-        for ixs in &txs {
-            env.send(ixs, &[&cranker]).unwrap();
-        }
-        env.keep(660);
-    }
-}
-
-/// The keeper's fast path. One hop: the whole switch in ONE transaction (compact tick arrays
-/// keep it under 64 accounts). More hops: pull + all hops in one transaction, then reprice + add
-/// in the next, sent the moment the first lands.
-fn fast_switch(env: &mut Env, target: anchor_lang::prelude::Pubkey) -> usize {
-    let cranker = env.funded();
-    let est = env.crank_as(&cranker.pubkey()).estimate().unwrap();
-    for a in env.crank_as(&cranker.pubkey()).bundle_prep(&est) {
-        let mut s: Vec<&Kp> = vec![&cranker];
-        s.extend(a.signers.iter());
-        env.send(&a.ixs, &s).unwrap();
-    }
-    let steps = env.crank_as(&cranker.pubkey()).switch_steps(&est, true);
-    let count = |ixs: &[anchor_lang::solana_program::instruction::Instruction], payer: anchor_lang::prelude::Pubkey| {
-        let mut keys: Vec<_> = ixs.iter().flat_map(|ix| ix.accounts.iter().map(|m| m.pubkey).chain([ix.program_id])).collect();
-        keys.push(payer);
-        keys.push(anchor_lang::prelude::pubkey!("ComputeBudget111111111111111111111111111111"));
-        keys.sort();
-        keys.dedup();
-        keys.len()
-    };
-    let txs: Vec<Vec<_>> = if est.hops.len() <= 1 {
-        vec![steps.into_iter().flatten().collect()]
-    } else {
-        let n = steps.len();
-        vec![steps.into_iter().take(n - 1).flatten().collect()]
-    };
-    let mut sent = 0;
-    for ixs in &txs {
-        let k = count(ixs, cranker.pubkey());
-        env.send(ixs, &[&cranker]).unwrap_or_else(|e| panic!("fast switch tx {sent}: {e}"));
-        eprintln!("  tx {sent}: {k} accounts, {} CU", env.last_cu);
-        assert!(k <= 64 && env.last_cu < 1_400_000);
-        sent += 1;
-    }
-    if est.hops.len() > 1 {
-        let finish = env.crank_as(&cranker.pubkey()).finish_ixs().expect("phase Repricing after the hops");
-        let k = count(&finish, cranker.pubkey());
-        env.send(&finish, &[&cranker]).unwrap_or_else(|e| panic!("finish tx: {e}"));
-        eprintln!("  finish: {k} accounts, {} CU", env.last_cu);
-        assert!(k <= 64 && env.last_cu < 1_400_000);
-        sent += 1;
-    }
-    let c = env.config();
-    assert_eq!(c.switch.phase, Phase::Idle);
-    assert_eq!(c.active_quote, target);
-    sent
 }
 
 #[test]
-fn fast_switch_one_tx_for_one_hop_two_txs_otherwise() {
+fn pool_has_liquidity_at_its_price_after_a_switch() {
     for order in ORDERS {
         let (mut env, whale) = traded_ordered(order);
-        let (x, wsol, y) = (env.x, env.wsol, env.y);
-        let usd0 = env.index_usd();
-        env.request(&whale, x).unwrap(); // USDC -> X: 1 hop
-        assert_eq!(fast_switch(&mut env, x), 1);
+        let x = env.x;
+        env.request(&whale, x).unwrap();
+        env.crank().unwrap();
+        let p = env.our_pool(&env.config().active_pool);
+        // More than the sentinel: the backing (or index) position is in range.
+        assert!(p.liquidity > 10_000_000, "in-range liquidity {}", p.liquidity);
+        // A small sell and a small buy both go through right away.
+        env.sell(&whale, 1_000 * 1_000_000).unwrap();
+        env.buy(&whale, 100_000).unwrap();
+    }
+}
+
+#[test]
+fn dust_backing_still_seeds_and_comes_back() {
+    for order in ORDERS {
+        // Tokens to burn handed out before launch, then a single $0.01 buy: the backing is dust.
+        let mut env = Env::new_ordered(order);
+        let (x, usdc) = (env.x, env.usdc);
+        let whale = env.funded();
+        env.give(&whale.pubkey(), BURN * 2);
         env.keep(660);
-        env.request(&whale, wsol).unwrap(); // X -> USDC -> SOL: 2 hops
-        assert_eq!(fast_switch(&mut env, wsol), 2);
+        env.launch(usdc, math::sqrt_ratio(1, 10_000).unwrap()).unwrap();
+        env.crank().unwrap();
+        env.buy(&whale, 10_000).unwrap();
         env.keep(660);
-        env.request(&whale, y).unwrap(); // SOL -> Y: 1 hop
-        assert_eq!(fast_switch(&mut env, y), 1);
+        env.request(&whale, x).unwrap();
+        env.crank().unwrap();
+        let labels: Vec<_> = env.crank_cu.iter().map(|s| s.0).collect();
+        assert!(labels.contains(&"seed"), "dust backing still funds a sentinel: {labels:?}");
         env.keep(660);
-        env.request(&whale, x).unwrap(); // Y -> SOL -> USDC -> X: 3 hops
-        assert_eq!(fast_switch(&mut env, x), 2);
-        assert_close(env.index_usd(), usd0, 0.03, "after four fast switches");
+        // Back to the launch pool, which has no sentinel (nothing to fund one at launch).
+        env.request(&whale, usdc).unwrap();
+        env.crank().unwrap();
+        assert_eq!(env.config().active_quote, usdc);
     }
 }

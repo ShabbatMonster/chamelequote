@@ -65,7 +65,7 @@
 
       <section id="overview">
         <h2>1. Overview</h2>
-        <p>Every token of this coin started out in one Orca pool owned by a Solana program. No person holds the keys to that pool, to the coin's supply or to its name. Two things can be changed by anyone who burns <b>1,000,000 of the coin itself</b> (not the quote token):</p>
+        <p>Every token of this coin sits in one Raydium pool, and the liquidity in it belongs to a Solana program. No person holds the keys to that liquidity, to the coin's supply or to its name. Two things can be changed by anyone who burns <b>1,000,000 of the coin itself</b> (not the quote token):</p>
         <ul>
           <li><b>The quote token:</b> what the coin trades against. It could be a tokenized stock like TSLAX, a dollar like USDC, SOL, or another coin on the approved list.</li>
           <li><b>The name, ticker and picture.</b></li>
@@ -82,11 +82,12 @@
             <tr><td>Request</td><td>Your 1,000,000 tokens go into escrow. Only one switch can run at a time.</td></tr>
             <tr><td>Pull</td><td>All liquidity comes out of the current pool, along with the trading fees it earned. Trading pauses here.</td></tr>
             <tr><td>Hop</td><td>The backing is swapped toward the new quote one Orca pool at a time, through USDC or SOL. This takes one to three swaps.</td></tr>
-            <tr><td>Reprice</td><td>The new pool is set to the carried-over price (see <a href="#carry">section 3</a>).</td></tr>
+            <tr><td>Reprice</td><td>The new Raydium pool is created at the carried-over price (see <a href="#carry">section 3</a>), or moved there if the coin has used it before.</td></tr>
+            <tr><td>Seed</td><td>The first time the coin uses a pool, 0.1% of the backing (with the matching amount of the coin) stays in it for good as a thin position across all prices. A Raydium pool with nothing in it can't be moved to a new price, so this is what lets the coin come back to the pool later.</td></tr>
             <tr><td>Add</td><td>Liquidity goes back in. Your escrowed tokens are burned. Trading resumes.</td></tr>
           </tbody>
         </table>
-        <p>The whole thing usually takes about a minute. If a switch is not finished within <b>10 minutes</b>, anyone can cancel it: your 1,000,000 tokens are sent back, and the liquidity goes back in against whichever token the backing is held in at that moment.</p>
+        <p>The keeper sends the steps back to back as soon as your request lands. A switch back into a pool the coin has used before fits in one transaction, so trading never pauses. Otherwise it takes two, and trading pauses for about a second. If a switch is not finished within <b>10 minutes</b>, anyone can cancel it: your 1,000,000 tokens are sent back, and the liquidity goes back in against whichever token the backing is held in at that moment.</p>
         <h3>When you can't switch</h3>
         <ul>
           <li>Another switch is already running.</li>
@@ -154,8 +155,8 @@
       <section id="fees">
         <h2>7. Fees</h2>
         <ul>
-          <li><b>Trading fee:</b> 1% per trade, paid into the coin's own pool (Orca's 1% fee tier).</li>
-          <li><b>Where it goes:</b> at each switch, the fees are collected. A share set at launch (<span id="fee-share">at most 50%</span>) goes to the project's fee wallet; the rest stays in the pool as extra backing.</li>
+          <li><b>Trading fee:</b> 1% per trade, paid into the coin's own pool (Raydium's 1% fee tier). Raydium keeps 16% of it, so the coin's positions earn 0.84%.</li>
+          <li><b>Where it goes:</b> the keeper collects the fees every 15 minutes and right before each switch. A share set by the admin (<span id="fee-share">up to 100%</span>) goes to the project's fee wallet; the rest stays as extra backing.</li>
           <li><b>Swap fees:</b> when the backing is swapped during a switch, the route pools charge their usual fees (typically 0.04% to 1% per hop).</li>
           <li><b>Burns:</b> 1,000,000 of the coin per rename or switch. There is no other charge, besides normal Solana network fees.</li>
         </ul>
@@ -181,7 +182,8 @@
             <tr><th scope="row">Mint authority</th><td>none (revoked at launch)</td></tr>
             <tr><th scope="row">Freeze authority</th><td>none</td></tr>
             <tr><th scope="row">Metadata update authority</th><td>the program's <code>authority</code> account</td></tr>
-            <tr><th scope="row">Pools</th><td>Orca Whirlpools, 1% fee tier (tick spacing 128)</td></tr>
+            <tr><th scope="row">Coin's pools</th><td>Raydium CLMM, 1% fee tier (tick spacing 120)</td></tr>
+            <tr><th scope="row">Route pools</th><td>Orca Whirlpools (one per quote, against USDC or SOL)</td></tr>
             <tr><th scope="row">Source</th><td><a href="https://github.com/ShabbatMonster/chamelequote" target="_blank" rel="noopener">github.com/ShabbatMonster/chamelequote</a></td></tr>
           </tbody>
         </table>
@@ -191,11 +193,13 @@
           <tbody>
             <tr><td><code>rename</code></td><td>anyone</td><td>Burns 1,000,000 of the coin and rewrites name, ticker and details link.</td></tr>
             <tr><td><code>request_switch</code></td><td>anyone</td><td>Escrows 1,000,000 of the coin and starts a switch to an approved quote.</td></tr>
-            <tr><td><code>pull</code>, <code>hop</code>, <code>reprice</code>, <code>add</code></td><td>anyone</td><td>The steps of a switch (see section 2).</td></tr>
+            <tr><td><code>pull</code>, <code>hop</code>, <code>reprice</code>, <code>seed</code>, <code>add</code></td><td>anyone</td><td>The steps of a switch (see section 2).</td></tr>
+            <tr><td><code>claim_fees</code></td><td>anyone</td><td>Collects the trading fees and pays the fee wallet its share.</td></tr>
             <tr><td><code>abort</code></td><td>anyone, after the deadline</td><td>Cancels a stalled switch and refunds the burn.</td></tr>
             <tr><td><code>poke_quotes</code>, <code>poke_pool</code></td><td>anyone</td><td>Update the price averages.</td></tr>
             <tr><td><code>list_quote</code>, <code>set_quote_enabled</code>, <code>set_quote_route</code></td><td>admin</td><td>Manage the approved list.</td></tr>
-            <tr><td><code>set_risk_bounds</code>, <code>set_fee_share</code></td><td>admin</td><td>Tune the safety checks (0.5% to 5%) and the fee share (at most 50%).</td></tr>
+            <tr><td><code>set_risk_bounds</code>, <code>set_fee_share</code></td><td>admin</td><td>Tune the safety checks (0.5% to 5%) and the fee share (up to 100%).</td></tr>
+            <tr><td><code>set_pool_venue</code></td><td>admin</td><td>Picks the Raydium fee tier new pools are created in.</td></tr>
             <tr><td><code>set_admin</code></td><td>admin</td><td>Hands over or renounces the admin role. Renouncing freezes the list for good.</td></tr>
           </tbody>
         </table>
@@ -205,7 +209,7 @@
       <section id="risks">
         <h2>10. Risks</h2>
         <ul>
-          <li><b>Not audited.</b> The program has been tested against the real Orca and Metaplex programs, but no outside firm has reviewed it.</li>
+          <li><b>Not audited.</b> The program has been tested against the real Raydium, Orca and Metaplex programs, but no outside firm has reviewed it.</li>
           <li><b>Stock tokens:</b> tokenized stocks are issued by a company that can pause, freeze or move them. That includes the coin's backing while it sits in one.</li>
           <li><b>Thin quotes:</b> a quote with a shallow pool can make a switch fail its slippage check, or cost the backing a few percent.</li>
           <li><b>The admin list:</b> whoever holds the admin role decides which tokens can be quotes, until the role is renounced.</li>
@@ -222,6 +226,7 @@
           <dt>Floor price</dt><dd>The price the coin would reach if every token were sold back. The backing covers everything above it.</dd>
           <dt>Hub</dt><dd>USDC or SOL. Every approved quote routes through one of them.</dd>
           <dt>Route pool</dt><dd>The Orca pool pairing a quote with its hub. Swaps and price averages use it.</dd>
+          <dt>Sentinel</dt><dd>The thin, all-prices position the coin leaves in every pool it has used, so the pool can be repriced when the coin comes back.</dd>
           <dt>Escrow</dt><dd>Where a switch request's burn waits until the switch lands (burned) or is cancelled (refunded).</dd>
           <dt>Keeper</dt><dd>The helper program that runs switch steps and updates price averages.</dd>
         </dl>

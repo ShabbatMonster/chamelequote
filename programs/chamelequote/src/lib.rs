@@ -4,6 +4,7 @@ pub mod error;
 pub mod instructions;
 pub mod math;
 pub mod metaplex;
+pub mod raydium;
 pub mod state;
 pub mod util;
 pub mod validate;
@@ -56,6 +57,10 @@ pub mod chamelequote {
         quotes::set_fee_share(ctx, recipient, share_bps)
     }
 
+    pub fn set_pool_venue(ctx: Context<AdminConfig>, clmm_config: Pubkey, tick_spacing: u16) -> Result<()> {
+        quotes::set_pool_venue(ctx, clmm_config, tick_spacing)
+    }
+
     // Price averages (keeper)
 
     pub fn poke_quotes<'info>(ctx: Context<'info, PokeQuotes>) -> Result<()> {
@@ -80,12 +85,21 @@ pub mod chamelequote {
         switch::pull(ctx)
     }
 
+    /// `pull` from the Orca pool the liquidity lived in before the move to Raydium.
+    pub fn pull_legacy<'info>(ctx: Context<'info, PullLegacy<'info>>) -> Result<()> {
+        legacy::pull_legacy(ctx)
+    }
+
     pub fn hop<'info>(ctx: Context<'info, Hop<'info>>) -> Result<()> {
         switch::hop(ctx)
     }
 
     pub fn reprice<'info>(ctx: Context<'info, Reprice<'info>>) -> Result<()> {
         switch::reprice(ctx)
+    }
+
+    pub fn seed<'info>(ctx: Context<'info, Seed<'info>>) -> Result<()> {
+        switch::seed(ctx)
     }
 
     pub fn add<'info>(ctx: Context<'info, Add<'info>>) -> Result<()> {
