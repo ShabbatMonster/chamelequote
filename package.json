@@ -7,7 +7,7 @@
     "build:dev": "cargo-build-sbf --manifest-path programs/chamelequote/Cargo.toml --sbf-out-dir target/deploy-dev --features dev",
     "test": "npm run build:dev && cd tests-svm && cargo test",
     "keeper:build": "cd keeper && cargo build --release",
-    "site": "python -m http.server 8765 --directory docs"
+    "site": "python scripts/serve.py 8765"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.13",

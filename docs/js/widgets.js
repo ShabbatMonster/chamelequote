@@ -109,7 +109,10 @@ export function initCombo(root, { options = [], value = null, placeholder = "", 
     if (!li) return;
     li.classList.add("active");
     (search ?? field).setAttribute("aria-activedescendant", li.id);
-    li.scrollIntoView({ block: "nearest" });
+    // Scroll the list only (scrollIntoView would scroll the page too).
+    const top = li.offsetTop - list.offsetTop;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (top + li.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + li.offsetHeight - list.clientHeight;
   };
 
   const isOpen = () => !(pop ?? list).hidden;
@@ -121,13 +124,13 @@ export function initCombo(root, { options = [], value = null, placeholder = "", 
     field.setAttribute("aria-expanded", "true");
     const shown = visible();
     highlight(seed ? shown[0] ?? -1 : Math.max(0, opts.findIndex((o) => o.value === current)));
-    search?.focus();
+    search?.focus({ preventScroll: true });
   };
   const closeList = (refocus = false) => {
     if (!isOpen()) return;
     (pop ?? list).hidden = true;
     field.setAttribute("aria-expanded", "false");
-    if (refocus) field.focus();
+    if (refocus) field.focus({ preventScroll: true });
   };
   const pick = (i) => {
     const o = opts[i];
