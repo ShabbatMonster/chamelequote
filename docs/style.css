@@ -106,7 +106,11 @@ code { font: 12px var(--mono); word-break: break-all; }
 }
 .menu a:hover, .menu a:focus, .menu button:hover, .menu button:focus { background: var(--select); color: var(--select-ink); outline: none; }
 .menu-sep { height: 0; margin: 3px 2px; border-top: 1px solid var(--chrome-lo); border-bottom: 1px solid var(--chrome-hi); }
-.menu .menu-empty { padding: 4px 22px; color: var(--chrome-lo); }
+.menu .menu-empty { padding: 4px 22px; color: var(--chrome-lo); white-space: normal; max-width: 220px; }
+.menu .wallet-item { display: flex; align-items: center; gap: 8px; }
+.menu .wallet-item img { width: 16px; height: 16px; }
+.wallet-msg { font: 11px var(--ui); margin-right: 8px; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wallet-msg.err { color: var(--alert); }
 
 /* ---------------------------------------------------------------- buttons */
 .btn {

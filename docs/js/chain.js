@@ -269,16 +269,29 @@ export function requestSwitchIx(user, state, target) {
   });
 }
 
-/** Signs with the injected wallet and waits for confirmation. Returns the signature. */
-export async function sendIx(conn, provider, ix) {
+/**
+ * Signs with the connected wallet (see wallet.js), sends, and waits for confirmation by polling
+ * over HTTP (free RPCs often don't serve the websocket web3.js would otherwise use, which leaves
+ * the page hanging after the transaction has already landed). `onSent(signature)` fires as soon
+ * as the transaction is submitted. Returns the signature.
+ */
+export async function sendIx(conn, wallet, ix, onSent = () => {}) {
   const tx = new web3.Transaction().add(web3.ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 }), ix);
-  tx.feePayer = provider.publicKey;
+  tx.feePayer = new web3.PublicKey(wallet.address);
   const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash();
   tx.recentBlockhash = blockhash;
-  const signed = await provider.signTransaction(tx);
-  const sig = await conn.sendRawTransaction(signed.serialize());
-  await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
-  return sig;
+  const signed = await wallet.sign(tx);
+  const sig = await conn.sendRawTransaction(signed, { maxRetries: 5 });
+  onSent(sig);
+  for (;;) {
+    const st = (await conn.getSignatureStatuses([sig])).value[0];
+    if (st?.err) throw new Error(`Transaction failed on-chain: ${JSON.stringify(st.err)}`);
+    if (st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") return sig;
+    if ((await conn.getBlockHeight()) > lastValidBlockHeight) {
+      throw new Error("The transaction expired without landing, so nothing was burned. Try again.");
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
 }
 
 /** Uploads bytes to IPFS; returns the gateway URL. */

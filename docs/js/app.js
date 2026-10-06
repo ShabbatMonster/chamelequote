@@ -4,13 +4,14 @@ import { initMenus, initCombo } from "./widgets.js";
 import { demoView, DEMO_WALLET } from "./demo.js";
 import { QUOTE_META } from "./quotes-meta.js";
 import * as chain from "./chain.js";
+import { listWallets, rememberWallet, lastWallet } from "./wallet.js";
 
 const $ = (id) => document.getElementById(id);
 const DEMO = !CONFIG.MINT || location.hash === "#demo";
 
 let view = null; // what the page shows (see demo.js for the shape)
 let conn = null;
-let wallet = null; // { provider, address, balance }
+let wallet = null; // { conn (from wallet.js), address, balance }
 
 // ---------------------------------------------------------------------------------------------
 // Formatting
@@ -28,9 +29,17 @@ const ago = (t) => {
 };
 const ipfsHttp = (u) => (u?.startsWith("ipfs://") ? CONFIG.IPFS_GATEWAY + u.slice(7) : u);
 
-function say(el, text, kind = "") {
+function say(el, text, kind = "", sig = null) {
   el.textContent = text;
   el.className = "msg" + (kind ? " " + kind : "");
+  if (sig) {
+    const a = document.createElement("a");
+    a.href = CONFIG.EXPLORER_TX + sig;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = "View on Solscan";
+    el.append(" ", a);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -89,7 +98,9 @@ function render() {
 const GROUP_ORDER = ["Stocks", "Pre-IPO", "Cash", "Solana", "Leveraged", "Backpack", "Collectibles", "Memes & More"];
 
 function renderBalance() {
-  $("switch-balance").textContent = wallet ? `${num(wallet.balance)} ${view.coin.symbol}` : "connect a wallet to see";
+  // The wallet can connect before the coin data has loaded; render() calls this again afterwards.
+  const symbol = view?.coin?.symbol ?? "";
+  $("switch-balance").textContent = wallet ? `${num(wallet.balance)} ${symbol}`.trim() : "connect a wallet to see";
 }
 
 function renderHappenings() {
@@ -112,7 +123,7 @@ function renderHappenings() {
     const what = document.createElement("td");
     const tag = document.createElement("b");
     tag.className = `ev-${h.name}`;
-    tag.textContent = { Renamed: "Renamed", Switched: "Switched", SwitchRequested: "Requested", SwitchAborted: "Cancelled" }[h.name] + ": ";
+    tag.textContent = (h.launch ? "Launched" : { Renamed: "Renamed", Switched: "Switched", SwitchRequested: "Requested", SwitchAborted: "Cancelled" }[h.name]) + ": ";
     what.append(tag, h.detail);
     if (h.sig) {
       const a = document.createElement("a");
@@ -170,61 +181,95 @@ function renderSwitch() {
 // ---------------------------------------------------------------------------------------------
 // Wallet
 
-const PROVIDERS = [
-  { name: "Phantom", get: () => window.phantom?.solana ?? (window.solana?.isPhantom ? window.solana : null) },
-  { name: "Solflare", get: () => (window.solflare?.isSolflare ? window.solflare : null) },
-  { name: "Backpack", get: () => window.backpack?.solana ?? window.backpack ?? null },
-];
+function walletSay(text, err = false) {
+  const el = $("wallet-msg");
+  el.textContent = text;
+  el.className = "wallet-msg" + (err ? " err" : "");
+}
 
+/** Rebuilt every time the menu opens, so wallets that load late still show up. */
 function renderWalletMenu() {
   const menu = $("menu-wallet");
   menu.innerHTML = "";
-  const item = (label, fn) => {
+  const item = (label, fn, icon) => {
     const b = document.createElement("button");
     b.type = "button";
     b.setAttribute("role", "menuitem");
-    b.textContent = label;
+    b.className = "wallet-item";
+    if (icon) {
+      const img = document.createElement("img");
+      img.src = icon;
+      img.alt = "";
+      b.append(img);
+    }
+    b.append(label);
     b.addEventListener("click", fn);
     menu.append(b);
   };
   if (wallet) {
     item("Copy My Address", () => copy(wallet.address));
     item("Disconnect", () => {
-      wallet.provider?.disconnect?.();
+      wallet.conn?.disconnect?.();
       wallet = null;
+      rememberWallet(null);
       $("wallet-btn").textContent = "Connect Wallet";
-      renderWalletMenu();
+      walletSay("");
       renderBalance();
     });
     return;
   }
-  const found = PROVIDERS.filter((p) => DEMO || p.get());
+  if (DEMO) {
+    item("Demo Wallet", () => connectWallet(null));
+    return;
+  }
+  const found = listWallets();
   if (!found.length) {
     const p = document.createElement("p");
     p.className = "menu-empty";
-    p.textContent = "No Solana wallet found. Install Phantom or Solflare.";
+    p.textContent = "No Solana wallet found. Install Phantom, Solflare or Backpack, or open this page in your wallet app's browser.";
     menu.append(p);
     return;
   }
-  for (const p of found) item(`${p.name}${DEMO ? " (demo)" : ""}`, () => connectWallet(p));
+  for (const w of found) item(w.name, () => connectWallet(w), w.icon);
 }
 
-async function connectWallet(p) {
+async function connectWallet(w, silent = false) {
   try {
-    if (DEMO) {
-      wallet = { provider: null, address: DEMO_WALLET.address, balance: DEMO_WALLET.balance };
+    if (!w) {
+      wallet = { conn: null, address: DEMO_WALLET.address, balance: DEMO_WALLET.balance };
     } else {
-      const provider = p.get();
-      await provider.connect();
-      wallet = { provider, address: provider.publicKey.toBase58(), balance: 0 };
-      await refresh();
+      if (!silent) walletSay(`Waiting for ${w.name}…`);
+      const conn = await w.connect(silent);
+      wallet = { conn, address: conn.address, balance: 0 };
+      rememberWallet(w.name);
     }
+    // Show the connection right away; the balance follows.
     $("wallet-btn").textContent = short(wallet.address);
-    renderWalletMenu();
+    walletSay("");
     renderBalance();
+    if (!DEMO) {
+      walletSay("Loading balance…");
+      refresh()
+        .then(() => walletSay(""))
+        .catch((e) => walletSay(`Connected, but loading the balance failed: ${String(e?.message ?? e).slice(0, 80)}`, true));
+    }
   } catch (e) {
-    say($("switch-msg"), `Wallet did not connect: ${e.message ?? e}`, "err");
+    if (silent) return; // not approved before: stay quiet
+    const msg = String(e?.message ?? e);
+    walletSay(/reject|denied|cancel/i.test(msg) ? "Connection cancelled." : `Could not connect: ${msg.slice(0, 80)}`, true);
   }
+}
+
+/** Reconnects the last wallet without a popup, if the user approved this site before. */
+function autoReconnect() {
+  const name = lastWallet();
+  if (!name || DEMO) return;
+  const tryIt = () => {
+    const w = listWallets().find((x) => x.name === name);
+    if (w && !wallet) connectWallet(w, true);
+    return !!w;
+  };
+  if (!tryIt()) setTimeout(tryIt, 800); // some wallets announce themselves a beat after load
 }
 
 async function copy(text) {
@@ -259,6 +304,7 @@ function needTokens(msgEl) {
 
 async function onSwitch() {
   const msg = $("switch-msg");
+  if (!view) return say(msg, "Still loading the coin. Try again in a second.", "err");
   const target = view.quotes.find((q) => q.mint === combo.value);
   if (!target) return say(msg, "Pick a quote token from the list first.", "err");
   if (!needWallet(msg) || !needTokens(msg)) return;
@@ -290,10 +336,13 @@ async function onSwitch() {
       say(msg, `Done. ${view.coin.symbol} now trades against ${target.symbol}.`, "ok");
     } else {
       say(msg, "Waiting for your wallet…");
-      const ix = chain.requestSwitchIx(wallet.provider.publicKey, view.raw, new (await chain.loadWeb3()).PublicKey(target.mint));
-      const sigTx = await chain.sendIx(conn, wallet.provider, ix);
+      const { PublicKey } = await chain.loadWeb3();
+      const ix = chain.requestSwitchIx(new PublicKey(wallet.address), view.raw, new PublicKey(target.mint));
+      const sigTx = await chain.sendIx(conn, wallet.conn, ix, (sig) =>
+        say(msg, "Sent! Waiting for the network to confirm…", "", sig),
+      );
       watching = { target: target.mint, sig: sigTx };
-      say(msg, `Burn received. Switching to ${target.symbol}; this takes about a minute.`);
+      say(msg, `Burn received. Switching to ${target.symbol}; this takes about a minute.`, "", sigTx);
       await refresh();
       pollSwitch();
     }
@@ -341,6 +390,10 @@ async function onRename(e) {
   const file = $("rn-image").files[0];
   const bad = checkRename(name, symbol);
   if (bad) return say(msg, bad, "err");
+  if (!view) return say(msg, "Still loading the coin. Try again in a second.", "err");
+  if (name === view.coin.name && symbol === view.coin.symbol && !file && !description) {
+    return say(msg, "That's already the coin's name and ticker. Nothing was burned.", "err");
+  }
   if (file && file.size > 2_000_000) return say(msg, "Pictures must be under 2 MB.", "err");
   if (!needWallet(msg) || !needTokens(msg)) return;
 
@@ -369,8 +422,16 @@ async function onRename(e) {
       const json = new Blob([JSON.stringify({ name, symbol, description, image })], { type: "application/json" });
       const uri = await chain.ipfsUpload(json, "metadata.json");
       say(msg, "Waiting for your wallet…");
-      await chain.sendIx(conn, wallet.provider, chain.renameIx(wallet.provider.publicKey, name, symbol, uri));
+      const { PublicKey } = await chain.loadWeb3();
+      const sig = await chain.sendIx(conn, wallet.conn, chain.renameIx(new PublicKey(wallet.address), name, symbol, uri), (s2) =>
+        say(msg, "Sent! Waiting for the network to confirm…", "", s2),
+      );
+      happeningsCache.at = 0; // show the rename in Recent Happenings right away
       await refresh();
+      say(msg, `Done. Say hello to ${name} ($${symbol}). The page header shows it now; wallets and Solscan may take a while to catch up.`, "ok", sig);
+      $("rename-form").reset();
+      updatePreview();
+      return;
     }
     say(msg, `Done. Say hello to ${name} ($${symbol}).`, "ok");
     $("rename-form").reset();
@@ -439,9 +500,13 @@ function toView(s, happenings, image) {
     quoteChanges: Number(s.config.quoteChanges),
     quotes: s.quotes.map(quoteView),
     sw: { phase: s.config.switch.phase, target: s.config.switch.target.toBase58() },
-    happenings: happenings.map((h) => ({
+    happenings: happenings.map((h) => {
+      // The launch lays the first pool through the same path as a switch, with no requester.
+      const launch = h.name === "Switched" && /^1+$/.test(h.user.toBase58());
+      return {
       name: h.name,
-      user: short(h.user.toBase58()),
+      launch,
+      user: launch ? "launch" : short(h.user.toBase58()),
       ago: h.time ? ago(h.time) : "",
       sig: h.sig,
       detail:
@@ -449,7 +514,8 @@ function toView(s, happenings, image) {
         : h.name === "Switched" ? `now paired with ${symbolOf(h.quote)}`
         : h.name === "SwitchRequested" ? `asked to switch ${symbolOf(h.from)} → ${symbolOf(h.to)}`
         : `switch to ${symbolOf(h.wanted)} timed out; burn refunded, landed in ${symbolOf(h.landed)}`,
-    })),
+      };
+    }),
   };
 }
 
@@ -459,7 +525,8 @@ let happeningsCache = { at: 0, rows: [] };
 async function refresh() {
   if (DEMO) return render();
   conn ??= await chain.connect();
-  const s = await chain.loadState(conn, wallet?.provider?.publicKey);
+  const owner = wallet ? new (await chain.loadWeb3()).PublicKey(wallet.address) : null;
+  const s = await chain.loadState(conn, owner);
   if (s.metadata.uri !== imageCache.uri) {
     imageCache = { uri: s.metadata.uri, image: null };
     try {
@@ -481,9 +548,12 @@ async function refresh() {
 // Boot
 
 installCursors();
+// Before initMenus: rebuild the wallet list first, then the menu opens with it.
+$("wallet-btn").addEventListener("click", renderWalletMenu);
 initMenus(document.querySelector(".menubar"));
 combo = initCombo($("quote-combo"), { placeholder: "Choose…" });
 renderWalletMenu();
+autoReconnect();
 $("switch-go").addEventListener("click", onSwitch);
 $("rename-form").addEventListener("submit", onRename);
 for (const id of ["rn-name", "rn-symbol", "rn-image"]) $(id).addEventListener("input", updatePreview);
