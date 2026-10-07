@@ -64,7 +64,9 @@ function render() {
     `*** Welcome to the home of ${v.coin.name} ($${v.coin.symbol})! ***   ` +
     (v.launched ? `Now paired with ${v.active.symbol} at ${usd(v.price.usd)} a token   ***   ` : "") +
     `${num(v.totalBurned)} tokens burned so far   ***   ` +
-    `Burn ${num(v.burnAmount)} to rename it or to change what it trades against   ***`;
+    (CONFIG.ENDED
+      ? "The experiment has ended: switching and renaming are closed for good. The coin keeps trading in its last pool   ***"
+      : `Burn ${num(v.burnAmount)} to rename it or to change what it trades against   ***`);
 
   if (v.launched) {
     const qs = v.active.symbol;
@@ -206,7 +208,8 @@ function updateCooldown() {
   const inFlight = view.sw.phase !== "Idle";
   const left = view.opensAt ? Math.ceil(view.opensAt - Date.now() / 1000) : 0;
   const cooling = !inFlight && view.launched && left > 0;
-  $("switch-go").disabled = inFlight || !view.launched || cooling;
+  $("switch-go").disabled = CONFIG.ENDED || inFlight || !view.launched || cooling;
+  $("rename-go").disabled ||= CONFIG.ENDED;
   const note = $("switch-cooldown");
   note.hidden = !cooling;
   if (cooling) {
@@ -357,8 +360,11 @@ function burnAccount() {
   return a && a.amount >= view.burnAmount ? a.pubkey : null;
 }
 
+const ENDED_MSG = "The experiment has ended and the program is closed, so nothing can be burned any more. The coin still trades in its last pool.";
+
 async function onSwitch() {
   const msg = $("switch-msg");
+  if (CONFIG.ENDED) return say(msg, ENDED_MSG, "err");
   if (!view) return say(msg, "Still loading the coin. Try again in a second.", "err");
   const target = view.quotes.find((q) => q.mint === combo.value);
   if (!target) return say(msg, "Pick a quote token from the list first.", "err");
@@ -443,6 +449,7 @@ function checkRename(name, symbol) {
 async function onRename(e) {
   e.preventDefault();
   const msg = $("rename-msg");
+  if (CONFIG.ENDED) return say(msg, ENDED_MSG, "err");
   const name = $("rn-name").value.trim();
   const symbol = $("rn-symbol").value.trim();
   const description = $("rn-desc").value.trim();
@@ -634,6 +641,11 @@ combo = initCombo($("quote-combo"), { placeholder: "Choose…" });
 renderWalletMenu();
 autoReconnect();
 $("switch-go").addEventListener("click", onSwitch);
+if (CONFIG.ENDED) {
+  for (const id of ["switch-go", "rename-go"]) $(id).disabled = true;
+  say($("switch-msg"), ENDED_MSG);
+  say($("rename-msg"), ENDED_MSG);
+}
 $("rename-form").addEventListener("submit", onRename);
 for (const id of ["rn-name", "rn-symbol", "rn-image"]) $(id).addEventListener("input", updatePreview);
 $("copy-ca").addEventListener("click", () => copy(view.coin.mint));
