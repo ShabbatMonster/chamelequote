@@ -336,9 +336,25 @@ function needWallet(msgEl) {
 }
 
 function needTokens(msgEl) {
-  if (wallet.balance >= view.burnAmount) return true;
-  say(msgEl, `You need ${num(view.burnAmount)} ${view.coin.symbol} to do this. You have ${num(wallet.balance)}.`, "err");
+  if (wallet.balance < view.burnAmount) {
+    say(msgEl, `You need ${num(view.burnAmount)} ${view.coin.symbol} to do this. You have ${num(wallet.balance)}.`, "err");
+    return false;
+  }
+  if (DEMO || burnAccount()) return true;
+  // A burn comes out of one token account, and these coins are spread over several.
+  say(
+    msgEl,
+    `Your ${view.coin.symbol} is split across ${wallet.accounts.length} token accounts and none holds ${num(view.burnAmount)} on its own. ` +
+      "Send them all to your own address once (that gathers them in one account), then try again.",
+    "err",
+  );
   return false;
+}
+
+/** The wallet's token account holding enough for a burn on its own (the fullest), if any. */
+function burnAccount() {
+  const a = wallet.accounts?.[0];
+  return a && a.amount >= view.burnAmount ? a.pubkey : null;
 }
 
 async function onSwitch() {
@@ -376,7 +392,7 @@ async function onSwitch() {
     } else {
       say(msg, "Waiting for your wallet…");
       const { PublicKey } = await chain.loadWeb3();
-      const ix = chain.requestSwitchIx(new PublicKey(wallet.address), view.raw, new PublicKey(target.mint));
+      const ix = chain.requestSwitchIx(new PublicKey(wallet.address), view.raw, new PublicKey(target.mint), burnAccount());
       const sigTx = await chain.sendIx(conn, wallet.conn, ix, (sig) =>
         say(msg, "Sent! Waiting for the network to confirm…", "", sig),
       );
@@ -470,7 +486,7 @@ async function onRename(e) {
       const uri = await chain.ipfsUpload(json, "metadata.json");
       say(msg, "Waiting for your wallet…");
       const { PublicKey } = await chain.loadWeb3();
-      const sig = await chain.sendIx(conn, wallet.conn, chain.renameIx(new PublicKey(wallet.address), name, symbol, uri), (s2) =>
+      const sig = await chain.sendIx(conn, wallet.conn, chain.renameIx(new PublicKey(wallet.address), name, symbol, uri, burnAccount()), (s2) =>
         say(msg, "Sent! Waiting for the network to confirm…", "", s2),
       );
       happeningsCache.at = 0; // show the rename in Recent Happenings right away
@@ -586,7 +602,8 @@ let happeningsCache = { at: 0, rows: [] };
 async function refresh() {
   if (DEMO) return render();
   conn ??= await chain.connect();
-  const owner = wallet ? new (await chain.loadWeb3()).PublicKey(wallet.address) : null;
+  const address = wallet?.address;
+  const owner = address ? new (await chain.loadWeb3()).PublicKey(address) : null;
   const s = await chain.loadState(conn, owner);
   if (s.metadata.uri !== imageCache.uri) {
     imageCache = { uri: s.metadata.uri, image: null };
@@ -601,7 +618,8 @@ async function refresh() {
     happeningsCache = { at: Date.now(), rows: await chain.loadHappenings(conn).catch(() => happeningsCache.rows) };
   }
   view = toView(s, happeningsCache.rows, imageCache.image);
-  if (wallet) wallet.balance = s.balance ?? 0;
+  // (Only if it's still the wallet this refresh loaded: another may have connected meanwhile.)
+  if (wallet && wallet.address === address) Object.assign(wallet, { balance: s.balance ?? 0, accounts: s.tokenAccounts ?? [] });
   render();
 }
 

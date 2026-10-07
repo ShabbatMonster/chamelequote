@@ -13,6 +13,8 @@ export const CONFIG = {
   IPFS_GATEWAY: "https://gateway.pinata.cloud/ipfs/",
   // Written into the metadata of every rename, so the coin's links survive whoever renames it.
   LINKS: { website: "https://totality.ws", twitter: "https://x.com/totality_ws" },
+  // Lists every token account a wallet holds (CORS-open, no key needed).
+  HOLDINGS_API: "https://lite-api.jup.ag/ultra/v1/holdings/",
   EXPLORER_TX: "https://solscan.io/tx/",
   EXPLORER_ACCOUNT: "https://solscan.io/account/",
   WEB3_URL: "https://cdn.jsdelivr.net/npm/@solana/web3.js@1.98.0/+esm",

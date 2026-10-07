@@ -193,10 +193,41 @@ export async function loadState(conn, wallet) {
     state.inPool = Number(tokenAmount(indexVault.data)) / 1e6;
   }
   if (wallet) {
-    const [acc] = await many(conn, [ata(wallet, mint)]);
-    state.balance = acc ? Number(tokenAmount(acc.data)) / 1e6 : 0;
+    state.tokenAccounts = await walletTokenAccounts(conn, wallet, mint);
+    state.balance = state.tokenAccounts.reduce((t, a) => t + a.amount, 0);
   }
   return state;
+}
+
+// A wallet's coins aren't always in its associated token account: trading bots and apps such as
+// Axiom and GMGN often make accounts of their own, and the free RPC won't list a wallet's
+// accounts. Jupiter's holdings API does; every account it names is then re-read on-chain and kept
+// only if it really is this wallet's account for this coin.
+const accountLists = new Map(); // wallet -> { at, keys }
+
+async function walletTokenAccounts(conn, wallet, mint) {
+  const owner = wallet.toBase58();
+  let keys = accountLists.get(owner)?.at > Date.now() - 60_000 ? accountLists.get(owner).keys : null;
+  if (!keys) {
+    keys = [ata(wallet, mint).toBase58()];
+    try {
+      const res = await fetch(`${CONFIG.HOLDINGS_API}${owner}`);
+      if (!res.ok) throw new Error(String(res.status));
+      const listed = (await res.json()).tokens?.[CONFIG.MINT] ?? [];
+      keys = [...new Set([...keys, ...listed.map((t) => t.account)])];
+      accountLists.set(owner, { at: Date.now(), keys });
+    } catch {
+      /* Jupiter unreachable: the associated account only, and ask again next time */
+    }
+  }
+  const accs = await many(conn, keys.map(pk));
+  return keys
+    .map((k, i) => ({ pubkey: pk(k), acc: accs[i] }))
+    .filter(({ acc }) =>
+      acc?.owner.equals(pk(TOKEN_PROGRAM)) && acc.data.length >= 72
+      && pk(acc.data.slice(0, 32)).equals(mint) && pk(acc.data.slice(32, 64)).equals(wallet))
+    .map(({ pubkey, acc }) => ({ pubkey, amount: Number(tokenAmount(acc.data)) / 1e6 }))
+    .sort((a, b) => b.amount - a.amount);
 }
 
 /**
@@ -267,7 +298,8 @@ const concat = (...parts) => {
   return out;
 };
 
-export function renameIx(user, name, symbol, uri) {
+/** `from`: the user's token account to burn from (their associated one by default). */
+export function renameIx(user, name, symbol, uri, from) {
   const mint = pk(CONFIG.MINT);
   return new web3.TransactionInstruction({
     programId: programId(),
@@ -275,7 +307,7 @@ export function renameIx(user, name, symbol, uri) {
       meta(user, true, false),
       meta(configPda(), false, true),
       meta(mint, false, true),
-      meta(ata(user, mint), false, true),
+      meta(from ?? ata(user, mint), false, true),
       meta(authorityPda(), false, false),
       meta(metadataPda(mint), false, true),
       meta(pk(METADATA_PROGRAM), false, false),
@@ -285,7 +317,8 @@ export function renameIx(user, name, symbol, uri) {
   });
 }
 
-export function requestSwitchIx(user, state, target) {
+/** `from`: the user's token account the burn comes out of (their associated one by default). */
+export function requestSwitchIx(user, state, target, from) {
   const mint = pk(CONFIG.MINT);
   return new web3.TransactionInstruction({
     programId: programId(),
@@ -293,7 +326,7 @@ export function requestSwitchIx(user, state, target) {
       meta(user, true, true),
       meta(configPda(), false, true),
       meta(mint, false, false),
-      meta(ata(user, mint), false, true),
+      meta(from ?? ata(user, mint), false, true),
       meta(escrowPda(), false, true),
       meta(quotePda(state.config.activeQuote), false, false),
       meta(quotePda(target), false, false),
